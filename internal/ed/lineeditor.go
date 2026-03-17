@@ -199,24 +199,9 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
 	}
-	// draw page indicator at far right if more pages exist
-	if end < len(cands) {
-		// move to column cols-3 and write '>>'
-		os.Stdout.WriteString("\r\x1b[" + fmt.Sprintf("%d", cols-3) + "C")
-		os.Stdout.WriteString("»")
-	}
-	// debug rows to stderr
-	if os.Getenv("KUSH_KEYDEBUG") == "2" {
-		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
-	}
-	// move down one line (we want prompt below the two candidate rows) and render prompt there
-	os.Stdout.WriteString("\x1b[1B")
-	// render prompt+buffer directly here to avoid racing with external renderLine calls
-	os.Stdout.WriteString("\r\x1b[K")
-	os.Stdout.WriteString(prompt)
-	os.Stdout.WriteString(string(buf))
-	// ensure cursor is positioned inside the prompt at len(prompt)+cursor
+	// finally ensure cursor is positioned inside the prompt at len(prompt)+cursor
 	pos := len(prompt) + cursor
+	// absolute column move
 	os.Stdout.WriteString("\r")
 	if pos > 0 {
 		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
