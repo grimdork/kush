@@ -203,8 +203,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	pos := len(prompt) + cursor
 	// absolute column move
 	os.Stdout.WriteString("\r")
-	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
+	if pos >= 0 {
+		// CSI nG is 1-indexed; we want the column after the prompt so add 1
+		col := pos + 1
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
 	}
 	os.Stdout.Sync()
 }
