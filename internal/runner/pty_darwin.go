@@ -3,11 +3,26 @@
 
 package runner
 
-import "fmt"
+/*
+#include <stdlib.h>
+#include <util.h>
 
-// Darwin/macOS: not implemented in this minimal initial pass. The runner will
-// fall back to non-PTY execution on macOS until a more complete darwin
-// implementation is provided.
+static int openpty_wrapper(int *amaster, int *aslave) {
+    return openpty(amaster, aslave, NULL, NULL, NULL);
+}
+*/
+import "C"
+import (
+	"fmt"
+)
+
+// openpty on darwin: call the system openpty via cgo wrapper.
 func openpty() (masterFD, slaveFD int, err error) {
-	return 0, 0, fmt.Errorf("openpty: not implemented on darwin yet")
+	var m C.int
+	var s C.int
+	ret := C.openpty_wrapper(&m, &s)
+	if ret != 0 {
+		return 0, 0, fmt.Errorf("openpty failed: %d", int(ret))
+	}
+	return int(m), int(s), nil
 }

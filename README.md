@@ -74,6 +74,29 @@ Support and next steps
   to inspect raw runes: run with `KUSH_KEYDEBUG=1 ./kush` and paste the
   stderr output.
 
+Debugging and auto-reload
+
+- KUSH_DEBUG controls informational diagnostics:
+  - `0` (default/unset): quiet — only real errors printed.
+  - `1`: verbose — prints messages such as "kush: aliases: loaded ..." and
+    alias warnings when setting aliases.
+
+- Auto-reload on SIGHUP: kush listens for SIGHUP and will reload aliases into
+  the in-memory cache when it receives the signal. This mirrors the
+  `alias -r` command and is useful for external workflows that update the
+  aliases file and then signal running shells to pick up changes.
+
+Examples
+
+Reload aliases from the running shell:
+
+- `alias -r` — reload aliases from the canonical file into kush's cache.
+
+Reload aliases from outside the shell:
+
+- `kill -HUP <pid-of-kush>` — send SIGHUP to the running kush process; if
+  `KUSH_DEBUG=1` you'll see a message on stderr confirming reload.
+
 Contributing
 
 PRs welcome. Keep the editor minimal and rune-aware; prefer configuration
