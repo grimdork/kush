@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/grimdork/kush/internal/completion"
 	"github.com/grimdork/kush/internal/log"
 )
 
@@ -20,6 +21,10 @@ var ErrEOF = errors.New("eof")
 type Editor struct {
 	history  []string
 	histPath string
+	// completion state
+	compStart      int
+	compCandidates []string
+	compIndex      int
 }
 
 // Close is a no-op for the simple ANSI editor (kept for API compatibility).
