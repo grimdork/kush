@@ -23,6 +23,9 @@ func (b *Builtins) Handle(line string) bool {
 		return false
 	}
 	switch parts[0] {
+	case "help":
+		printHelp(parts)
+		return true
 	case "cd":
 		dir := "~"
 		if len(parts) > 1 {
