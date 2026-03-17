@@ -19,7 +19,7 @@ import (
 // logs) still gets proper CR+LF translation. Returns the previous termios for
 // restoration after the child exits.
 func saveAndSetPassthrough(fd int) (unix.Termios, error) {
-	p, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	p, err := unix.IoctlGetTermios(fd, unix.TCGETS)
 	if err != nil {
 		return unix.Termios{}, err
 	}
@@ -32,10 +32,14 @@ func saveAndSetPassthrough(fd int) (unix.Termios, error) {
 	raw.Cc[unix.VMIN] = 1
 	raw.Cc[unix.VTIME] = 0
 
-	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &raw); err != nil {
+	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &raw); err != nil {
 		return old, err
 	}
 	return old, nil
+}
+
+func restoreTermios(fd int, t unix.Termios) error {
+	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
 }
 
 func restoreTermios(fd int, t unix.Termios) error {
