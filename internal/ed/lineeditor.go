@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"unsafe"
 
 	"github.com/grimdork/kush/internal/completion"
 	"github.com/grimdork/kush/internal/log"
@@ -84,9 +86,13 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if len(cands) == 0 {
 		return
 	}
-	// get terminal width from env fallback
+	// get terminal width via ioctl(TIOCGWINSZ) -> cols, fallback to $COLUMNS then 80
 	cols := 80
-	if v := os.Getenv("COLUMNS"); v != "" {
+	var ws struct{ Row, Col, X, Y uint16 }
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+	if errno == 0 && ws.Col > 0 {
+		cols = int(ws.Col)
+	} else if v := os.Getenv("COLUMNS"); v != "" {
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
 			cols = n
@@ -121,14 +127,20 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if end > len(cands) {
 		end = len(cands)
 	}
-	// print newline then two lines
-	os.Stdout.WriteString("\r\n")
+	// draw in-place: save cursor, move down, clear two lines, draw, restore cursor
+	// save cursor
+	os.Stdout.WriteString("\x1b[s")
+	// move cursor down one line to write candidates below prompt
+	os.Stdout.WriteString("\x1b[1B")
+	// clear two lines we'll use
+	os.Stdout.WriteString("\x1b[2K\r\n\x1b[2K\r")
+	// move back up to start drawing
+	os.Stdout.WriteString("\x1b[1A")
 	// first line
 	for i := start; i < start+perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
-			// inverse video
-			os.Stdout.WriteString("\x1b[7m" + s + "\x1b[0m")
+			os.Stdout.WriteString(colWrap(s, true))
 		} else {
 			os.Stdout.WriteString(s)
 		}
@@ -143,7 +155,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
-			os.Stdout.WriteString("\x1b[7m" + s + "\x1b[0m")
+			os.Stdout.WriteString(colWrap(s, true))
 		} else {
 			os.Stdout.WriteString(s)
 		}
@@ -152,8 +164,23 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	os.Stdout.WriteString("\r\n")
+	// restore cursor
+	os.Stdout.WriteString("\x1b[u")
 	renderLine(prompt, buf, cursor)
+}
+
+// colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
+func colWrap(s string, useInverse bool) string {
+	col := strings.ToLower(os.Getenv("KUSH_TAB_COLOUR"))
+	// map simple names to codes
+	m := map[string]string{"black": "30", "red": "31", "green": "32", "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37"}
+	if code, ok := m[col]; ok {
+		return "\x1b[" + code + "m" + s + "\x1b[0m"
+	}
+	if useInverse {
+		return "\x1b[7m" + s + "\x1b[0m"
+	}
+	return s
 }
 
 // Prompt reads a single line from stdin with minimal editing capabilities.
@@ -259,7 +286,11 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						perLine := 1
 						// compute perLine same way as renderCandidates
 						cols := 80
-						if v := os.Getenv("COLUMNS"); v != "" {
+						var ws struct{ Row, Col, X, Y uint16 }
+						_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+						if errno == 0 && ws.Col > 0 {
+							cols = int(ws.Col)
+						} else if v := os.Getenv("COLUMNS"); v != "" {
 							var n int
 							if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
 								cols = n
@@ -479,7 +510,11 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				// ensure page contains index
 				// compute perLine similar to renderCandidates
 				cols := 80
-				if v := os.Getenv("COLUMNS"); v != "" {
+				var ws struct{ Row, Col, X, Y uint16 }
+				_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+				if errno == 0 && ws.Col > 0 {
+					cols = int(ws.Col)
+				} else if v := os.Getenv("COLUMNS"); v != "" {
 					var n int
 					if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
 						cols = n
