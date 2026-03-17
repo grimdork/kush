@@ -159,3 +159,54 @@ func RunShell(line string) error {
 
 	return err
 }
+
+// helper functions for non-linux platforms and shared use
+func runPlain(line string) error {
+	stdinFd := int(os.Stdin.Fd())
+	if p, err := unix.IoctlGetTermios(stdinFd, unix.TIOCGETA); err == nil && p != nil {
+		old := *p
+		defer unix.IoctlSetTermios(stdinFd, unix.TIOCSETA, &old)
+	}
+
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+
+	cmd := exec.Command(shell, "-lc", line)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	return cmd.Run()
+}
+
+func saveAndSetPassthrough(fd int) (unix.Termios, error) {
+	p, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	if err != nil {
+		return unix.Termios{}, err
+	}
+	old := *p
+
+	raw := old
+	raw.Lflag &^= unix.ICANON | unix.ECHO | unix.ECHONL | unix.ISIG | unix.IEXTEN
+	raw.Iflag &^= unix.ICRNL | unix.INLCR | unix.IGNCR | unix.IXON
+	// Leave Oflag untouched — OPOST must stay enabled.
+	raw.Cc[unix.VMIN] = 1
+	raw.Cc[unix.VTIME] = 0
+
+	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &raw); err != nil {
+		return old, err
+	}
+	return old, nil
+}
+
+func restoreTermios(fd int, t unix.Termios) error {
+	return unix.IoctlSetTermios(fd, unix.TIOCSETA, &t)
+}
+
+func propagateWinSize(masterFd int) {
+	// TODO: copy the real terminal's winsize to the PTY master and listen
+	// for SIGWINCH to keep it in sync.
+	_ = masterFd
+}
