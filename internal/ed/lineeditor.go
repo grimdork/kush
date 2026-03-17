@@ -215,10 +215,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	bufw.WriteString(string(buf))
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
-	// restore full scroll region (unconditionally) and restore cursor
-	os.Stdout.WriteString("\x1b[r")
-	// restore saved cursor (DECRC)
+	// restore saved cursor (DECRC) first, then restore full scroll region to avoid remapping saved coordinates
 	os.Stdout.WriteString("\x1b8")
+	// restore to full-screen scrolling region
+	os.Stdout.WriteString("\x1b[r")
 	// debug rows to stderr
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
