@@ -1,104 +1,109 @@
-# kush — a tiny custom shell line editor
+# kush — a tiny custom shell
 
-Kush is a small terminal-focused shell/line editor project. It provides a custom
-single-line editor (no readline/go-prompt dependency), builtins, command
-history, and a future PTY-backed runner for interactive programs.
+Kush is a minimal terminal shell written in Go. It provides a custom
+single-line editor (no readline or go-prompt dependency), command aliases,
+persistent history, and a PTY-backed command runner so interactive programs
+behave correctly.
 
-This README documents a few terminal quirks and how to configure macOS
-terminals so Option/Alt behaves as Meta (Esc+), which kush expects for
-Alt+arrow / Option+Backspace / Option+Delete behaviours.
+## Features
 
-## Key behaviour
+- **Line editor** — single-line editing with cursor movement, history
+  navigation, and word-level operations. No external TUI libraries.
+- **PTY runner** — commands run inside a pseudoterminal (`openpty` on macOS,
+  `posix_openpt` on Linux) with automatic fallback to plain `exec` on
+  unsupported platforms.
+- **Aliases** — loaded from `~/.kush_aliases` (or `$KUSH_ALIASES`), with
+  two-pass chained expansion and live reload via `alias -r` or SIGHUP.
+- **Builtins** — `cd`, `history`, `alias`, `unalias`, `reload`, `which`,
+  `checksum` (stub).
+- **Config** — optional `~/.kush_config` for key=value settings like
+  `PATH_FIRST`.
 
-- Movement: Left/Right/Up/Down, Home/End are supported (CSI and OSC variants).
-- Meta/Option: The editor recognizes ESC-prefixed sequences as Alt/Meta (e.g.
-  ESC b / ESC f for alt-left/alt-right).
-- Option/Alt+Backspace / Option/Alt+Delete: Not all terminals send distinct
-  sequences by default — see configuration below.
-- Ctrl shortcuts: Ctrl+C clears the current line, Ctrl+D signals EOF,
-  and common kills are supported: Ctrl+W (backward-word), Ctrl+U (kill to
-  start of line), Ctrl+K (kill to end of line).
+## Building
 
-## macOS / iTerm2 / Terminal.app configuration
+```sh
+make          # produces ./kush
+make clean    # removes binaries
+```
 
-Kush expects Option (Alt) to act as Meta — i.e. to send an Escape prefix
-before the modified key. If Option is left as "normal" in some terminals,
-Option+Backspace may send the same byte as Backspace and cannot be distinguished
-by a terminal program.
+Requires Go 1.25+ and cgo on macOS (for `openpty`).
 
-iTerm2 (recommended)
+## Key bindings
 
-1. Preferences → Profiles → Keys
-2. Set Left Option (and/or Right Option) to: `Esc+`
+| Key               | Action                       |
+|--------------------|------------------------------|
+| Left / Right       | Move cursor                  |
+| Up / Down          | Navigate history             |
+| Home / End         | Jump to start / end of line  |
+| Alt+Left / Alt+Right | Move by word              |
+| Backspace          | Delete character left        |
+| Alt+Backspace      | Delete word left             |
+| Delete             | Delete word right            |
+| Ctrl+W             | Kill word left               |
+| Ctrl+U             | Kill to start of line        |
+| Ctrl+K             | Kill to end of line          |
+| Ctrl+C             | Clear current line           |
+| Ctrl+D             | Exit (EOF)                   |
 
-This makes Option+Backspace send `ESC 0x7f` which kush treats as Alt+Backspace
-and will delete the previous word.
+## Terminal configuration
 
-Terminal.app (macOS)
+Kush expects Option/Alt to send an Escape prefix (Meta mode). If word-delete
+shortcuts don't work, configure your terminal:
 
-1. Preferences → Profiles → Keyboard
-2. Click `+` to add a mapping
-3. For the Key, press Option+Backspace
-4. Set "Action" to "Send string to shell:"
-5. Paste the value: `\033\177` (that's ESC followed by DEL / 0x7f)
+**iTerm2:** Preferences → Profiles → Keys → set Left Option to `Esc+`.
 
-Other terminals
+**Terminal.app:** Preferences → Profiles → Keyboard → add a mapping for
+Option+Backspace that sends `\033\177`.
 
-- Alacritty: set `alt_send_escape: true` in your config, or add a key mapping
-  for `Option+Backspace` to send `\x1b\x7f`.
-- GNOME Terminal / VTE-based: check the profile keyboard preferences and
-  enable "Meta sends Escape" or add a custom keybinding.
+**Alacritty:** set `alt_send_escape: true` or add a key mapping for
+Option+Backspace → `\x1b\x7f`.
 
-Troubleshooting
+To inspect what your terminal sends for a key, run `cat -v` and press it.
 
-- To inspect what your terminal actually sends for a key, run:
+## Debug mode
 
-  cat -v
+Set `KUSH_DEBUG` to control diagnostic output on stderr:
 
-  Then press the key. Output examples:
+- `0` (default) — quiet; only real errors are printed.
+- `1` — verbose; alias loading, reload events, and runner diagnostics.
+- `2` — trace; detailed PTY lifecycle, termios state, and goroutine events.
 
-  - `^?` indicates DEL (0x7f)
-  - `^H` indicates Backspace (0x08)
-  - `^[` indicates ESC and will show sequences like `^[[3~` for Delete
+Key debug mode: run with `KUSH_KEYDEBUG=1` to log raw key codes to stderr.
 
-- If Option+Backspace prints the same as Backspace (e.g. both produce `^?`),
-  your terminal is not sending an ESC prefix. Configure Option-as-Esc as
-  above or use the Ctrl+W shortcut (supported by kush) as a cross-terminal
-  workaround.
+## Aliases
 
-Support and next steps
+Aliases are loaded from `~/.kush_aliases` (override with `$KUSH_ALIASES`).
+Supported formats:
 
-- The editor normalises a variety of CSI sequences (e.g. `ESC [ 3 ~`,
-  `ESC [ 3;3 ~`, `ESC O H`) so macOS and Linux variants work.
-- If you run into other terminal-specific issues, enable the key debug mode
-  to inspect raw runes: run with `KUSH_KEYDEBUG=1 ./kush` and paste the
-  stderr output.
+```
+alias ll='ls -la'
+ll='ls -la'
+ll=ls -la
+```
 
-Debugging and auto-reload
+Chained aliases work: if `la` expands to `ls -la` and `ls` expands to
+`ls --color=yes`, the result is `ls --color=yes -la` (without duplicate flags).
 
-- KUSH_DEBUG controls informational diagnostics:
-  - `0` (default/unset): quiet — only real errors printed.
-  - `1`: verbose — prints messages such as "kush: aliases: loaded ..." and
-    alias warnings when setting aliases.
+Reload from within the shell with `alias -r` or from outside with
+`kill -HUP <pid>`.
 
-- Auto-reload on SIGHUP: kush listens for SIGHUP and will reload aliases into
-  the in-memory cache when it receives the signal. This mirrors the
-  `alias -r` command and is useful for external workflows that update the
-  aliases file and then signal running shells to pick up changes.
+## Project structure
 
-Examples
-
-Reload aliases from the running shell:
-
-- `alias -r` — reload aliases from the canonical file into kush's cache.
-
-Reload aliases from outside the shell:
-
-- `kill -HUP <pid-of-kush>` — send SIGHUP to the running kush process; if
-  `KUSH_DEBUG=1` you'll see a message on stderr confirming reload.
-
-Contributing
-
-PRs welcome. Keep the editor minimal and rune-aware; prefer configuration
-notes rather than trying to invent terminal-side heuristics when terminals
-can be configured to send canonical sequences.
+```
+main.go                          Entry point
+internal/
+  shell/shell.go                 REPL loop
+  ed/                            Line editor and termios helpers
+    lineeditor.go                Editor implementation
+    term_darwin.go               macOS termios (raw mode)
+    term_linux.go                Linux termios
+  runner/                        Command execution
+    pty_runner.go                PTY runner + plain-exec fallback
+    pty_darwin.go                openpty via cgo (macOS)
+    pty_linux.go                 posix_openpt (Linux)
+    pty_unsupported.go           Stub for other platforms
+  aliases/aliases.go             Alias loading, expansion, persistence
+  builtins/builtins.go           Shell builtins
+  config/config.go               Config file loader
+  log/log.go                     Levelled logging
+```

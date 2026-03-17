@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/grimdork/kush/internal/aliases"
@@ -14,7 +15,7 @@ import (
 	"github.com/grimdork/kush/internal/runner"
 )
 
-// Run starts the simple REPL loop. It returns when the user exits or on error.
+// Run starts the REPL loop. It returns when the user exits or on error.
 func Run() error {
 	le, err := ed.New()
 	if err != nil {
@@ -22,7 +23,8 @@ func Run() error {
 	}
 	defer le.Close()
 
-	// handle SIGHUP to reload aliases into the package cache
+	// Reload aliases on SIGHUP so external tools can update the file and
+	// signal running shells to pick up changes.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGHUP)
 	go func() {
@@ -36,10 +38,7 @@ func Run() error {
 	}()
 
 	bt := builtins.New()
-	// load aliases (optional files)
 	al, _ := aliases.Load()
-	// load config (optional)
-	// load config (optional)
 	_, _ = config.Load()
 
 	for {
@@ -60,28 +59,35 @@ func Run() error {
 			continue
 		}
 
-		// Ensure aliases are expanded right before execution to avoid stale state.
+		// Expand aliases before execution. A two-pass scheme allows
+		// chained aliases (e.g. la → ls -la, ls → ls --color=yes) while
+		// avoiding infinite loops or duplicate flags.
 		if al == nil {
 			al, _ = aliases.Load()
 		}
 		if al != nil {
 			orig := line
-			// allow a single extra pass so aliases like "la -> ls -la" can pick up
-			// an alias for "ls" (common in bash where aliases apply after
-			// expansion). Limit to two passes to avoid infinite loops from
-			// recursive aliases.
-			line = al.Expand(line)
-			line = al.Expand(line)
+			first := al.Expand(line)
+			if first != line {
+				origTok := strings.Fields(line)
+				newTok := strings.Fields(first)
+				if len(origTok) > 0 && len(newTok) > 0 && origTok[0] != newTok[0] {
+					line = al.Expand(first)
+				} else {
+					line = first
+				}
+			}
 			if log.Level() >= 2 && orig != line {
-				log.Debugf("alias expanded: %q -> %q", orig, line)
+				log.Debugf("alias: %q -> %q", orig, line)
 			}
 		}
-		// Close the editor completely so the child runs on a normal terminal.
+
+		// Close the editor so the child gets a normal terminal, then
+		// recreate it for the next prompt.
 		le.Close()
 		if err := runner.RunShell(line); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 		}
-		// Recreate the editor for the next prompt.
 		le, err = ed.New()
 		if err != nil {
 			return err
