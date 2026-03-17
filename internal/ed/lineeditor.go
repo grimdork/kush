@@ -194,12 +194,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
 	}
-	// move back up to prompt line and restore prompt+cursor
-	os.Stdout.WriteString("\x1b[1A")
+	// move down one line (we want prompt below the two candidate rows) and render prompt there
+	os.Stdout.WriteString("\x1b[1B")
 	renderLine(prompt, buf, cursor)
 	// ensure cursor is positioned inside the prompt at len(prompt)+cursor
-	// restore saved cursor state then explicitly move inside prompt
-	os.Stdout.WriteString("\x1b[u")
 	pos := len(prompt) + cursor
 	os.Stdout.WriteString("\r")
 	if pos > 0 {
