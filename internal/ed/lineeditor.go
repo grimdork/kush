@@ -196,7 +196,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	}
 	// move down one line (we want prompt below the two candidate rows) and render prompt there
 	os.Stdout.WriteString("\x1b[1B")
-	renderLine(prompt, buf, cursor)
+	// render prompt+buffer directly here to avoid racing with external renderLine calls
+	os.Stdout.WriteString("\r\x1b[K")
+	os.Stdout.WriteString(prompt)
+	os.Stdout.WriteString(string(buf))
 	// ensure cursor is positioned inside the prompt at len(prompt)+cursor
 	pos := len(prompt) + cursor
 	os.Stdout.WriteString("\r")
