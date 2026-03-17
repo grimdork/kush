@@ -127,16 +127,13 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if end > len(cands) {
 		end = len(cands)
 	}
-	// draw in-place: save cursor, move down, clear two lines, draw, restore cursor
-	// save cursor
-	os.Stdout.WriteString("\x1b[s")
-	// move cursor down one line to write candidates below prompt
+	// draw in-place deterministically: move to line below prompt, overwrite two lines, then restore prompt
+	// Move to start of prompt line and then down one line.
+	os.Stdout.WriteString("\r")
+	// move down one line
 	os.Stdout.WriteString("\x1b[1B")
-	// clear two lines we'll use
-	os.Stdout.WriteString("\x1b[2K\r\n\x1b[2K\r")
-	// move back up to start drawing
-	os.Stdout.WriteString("\x1b[1A")
-	// first line
+	// write first line (clear first)
+	os.Stdout.WriteString("\x1b[2K")
 	for i := start; i < start+perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -144,14 +141,15 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		} else {
 			os.Stdout.WriteString(s)
 		}
-		// pad to column width
 		pad := colw - len(s)
 		for p := 0; p < pad; p++ {
 			os.Stdout.WriteString(" ")
 		}
 	}
+	// move to next line
 	os.Stdout.WriteString("\r\n")
-	// second line
+	// write second line (clear)
+	os.Stdout.WriteString("\x1b[2K")
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -164,8 +162,9 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// restore cursor
-	os.Stdout.WriteString("\x1b[u")
+	// move back up to prompt line
+	os.Stdout.WriteString("\r\x1b[1A")
+	// restore prompt and cursor
 	renderLine(prompt, buf, cursor)
 }
 
