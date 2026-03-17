@@ -98,10 +98,6 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			cols = n
 		}
 	}
-	if os.Getenv("KUSH_KEYDEBUG") == "2" {
-		// use stderr so debug isn't mixed with stdout control sequences
-		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d\n", cols, ws.Col)
-	}
 	// compute max width of a candidate (limited)
 	maxw := 0
 	for _, c := range cands {
@@ -120,6 +116,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	}
 	// total visible = perLine * 2
 	visible := perLine * 2
+	// normalize compPageStart to a multiple of visible and clamp
+	if visible > 0 {
+		ed.compPageStart = (ed.compPageStart / visible) * visible
+	}
 	if ed.compPageStart < 0 {
 		ed.compPageStart = 0
 	}
@@ -131,14 +131,21 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if end > len(cands) {
 		end = len(cands)
 	}
-	// draw in-place deterministically using absolute positioning: move to prompt column 0, then to the start of the candidate area
-	// Move to column 1
-	os.Stdout.WriteString("\r\x1b[1G")
-	// move down one line to candidates area
-	os.Stdout.WriteString("\x1b[1B")
-	// always clear first candidate line
+	// verbose debug for geometry when requested
+	if os.Getenv("KUSH_KEYDEBUG") == "2" {
+		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
+	}
+	// position cursor to end of prompt: carriage return then move right promptLen columns
+	promptLen := len(prompt)
+	os.Stdout.WriteString("\r")
+	if promptLen > 0 {
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", promptLen) + "C")
+	}
+	// move down one line to candidate area, then set to column 1
+	os.Stdout.WriteString("\x1b[1B\x1b[1G")
+	// clear both lines we'll overwrite
 	os.Stdout.WriteString("\x1b[2K\r")
-	// compute absolute column cursor: start at column 1 for candidates
+	// first candidate row
 	for i := start; i < start+perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -151,8 +158,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move down one line WITHOUT inserting a newline (use CSI 1B)
-	os.Stdout.WriteString("\r\x1b[1B\x1b[2K\r")
+	// move down to second candidate row without inserting a newline, clear line
+	os.Stdout.WriteString("\x1b[1B\x1b[2K\r")
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -165,9 +172,15 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move back up to prompt line (absolute column 1) without inserting newlines
-	os.Stdout.WriteString("\r\x1b[1A")
-	// caller will restore prompt and cursor
+	// draw page indicator at far right if more pages exist
+	if end < len(cands) {
+		// move to column cols-3 and write '>>'
+		os.Stdout.WriteString("\r\x1b[" + fmt.Sprintf("%d", cols-3) + "C")
+		os.Stdout.WriteString("»")
+	}
+	// move back up to prompt line and restore prompt+cursor
+	os.Stdout.WriteString("\x1b[1A")
+	renderLine(prompt, buf, cursor)
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
