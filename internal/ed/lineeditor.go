@@ -232,7 +232,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		col := pos + 1
 		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
 	}
-	oos.Stdout.Sync()
+	os.Stdout.Sync()
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
