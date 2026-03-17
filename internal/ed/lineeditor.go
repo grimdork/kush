@@ -164,8 +164,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	}
 	// move back up to prompt line
 	os.Stdout.WriteString("\r\x1b[1A")
-	// restore prompt and cursor
-	renderLine(prompt, buf, cursor)
+	// caller will restore prompt and cursor
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
@@ -317,6 +316,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						}
 						// redraw candidates
 						ed.renderCandidates(prompt, buf, cursor)
+						renderLine(prompt, buf, cursor)
 					}
 					continue
 				}
@@ -574,6 +574,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			}
 			// multiple candidates: show two-line page and leave buffer unchanged
 			ed.renderCandidates(prompt, buf, cursor)
+			renderLine(prompt, buf, cursor)
 			continue
 		}
 
