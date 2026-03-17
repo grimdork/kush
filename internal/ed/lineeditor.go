@@ -143,10 +143,14 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	}
 	// move down one line to candidate area, then set to column 1
 	os.Stdout.WriteString("\x1b[1B\x1b[1G")
-	// clear both lines we'll overwrite
+	// clear from cursor to end of screen to remove remnants below prompt
+	os.Stdout.WriteString("\x1b[0J")
+	// clear both lines we'll overwrite and draw first row
 	os.Stdout.WriteString("\x1b[2K\r")
-	// first candidate row
+	// first candidate row: collect indices for debug
+	row1 := []int{}
 	for i := start; i < start+perLine && i < end; i++ {
+		row1 = append(row1, i)
 		s := cands[i]
 		if i == ed.compIndex {
 			os.Stdout.WriteString(colWrap(s, true))
@@ -158,9 +162,14 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move down to second candidate row without inserting a newline, clear line
+	// flush stdout to ensure row1 is sent
+	os.Stdout.Sync()
+	// move down one line without inserting a newline, clear line
 	os.Stdout.WriteString("\x1b[1B\x1b[2K\r")
+	// second candidate row: collect indices for debug
+	row2 := []int{}
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
+		row2 = append(row2, i)
 		s := cands[i]
 		if i == ed.compIndex {
 			os.Stdout.WriteString(colWrap(s, true))
@@ -172,11 +181,17 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
+	// flush stdout to ensure row2 is sent
+	os.Stdout.Sync()
 	// draw page indicator at far right if more pages exist
 	if end < len(cands) {
 		// move to column cols-3 and write '>>'
 		os.Stdout.WriteString("\r\x1b[" + fmt.Sprintf("%d", cols-3) + "C")
 		os.Stdout.WriteString("»")
+	}
+	// debug rows to stderr
+	if os.Getenv("KUSH_KEYDEBUG") == "2" {
+		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
 	}
 	// move back up to prompt line and restore prompt+cursor
 	os.Stdout.WriteString("\x1b[1A")
