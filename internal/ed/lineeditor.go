@@ -150,6 +150,26 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString("\x1b[0J")
 	// clear both lines we'll overwrite and draw first row
 	os.Stdout.WriteString("\x1b[2K\r")
+	// Attempt defensive DECSTBM: restrict scroll region to the bottom 3 lines
+	// so the terminal treats our writes as in-place updates instead of new output.
+	// Fetch terminal rows (we already attempted cols earlier; reuse ws)
+	var rows int = 0
+	{
+		var ws struct{ Row, Col, X, Y uint16 }
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+		if errno == 0 && ws.Row > 0 {
+			rows = int(ws.Row)
+		}
+	}
+	if rows > 0 {
+		top := rows - 2
+		if top < 1 {
+			top = 1
+		}
+		bottom := rows
+		// CSI <top>;<bottom> r
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d;%dr", top, bottom))
+	}
 	// build both candidate rows and the prompt line into a single buffer to write atomically
 	bufw := &bytes.Buffer{}
 	// first row
@@ -195,6 +215,21 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	bufw.WriteString(string(buf))
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
+	// restore full scroll region if we changed it, then restore cursor
+	var rows int = 0
+	{
+		var ws struct{ Row, Col, X, Y uint16 }
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+		if errno == 0 && ws.Row > 0 {
+			rows = int(ws.Row)
+		}
+	}
+	if rows > 0 {
+		// restore to full-screen scrolling region
+		os.Stdout.WriteString("\x1b[r")
+	}
+	// restore saved cursor (DECRC)
+	os.Stdout.WriteString("\x1b8")
 	// debug rows to stderr
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
@@ -208,7 +243,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		col := pos + 1
 		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
 	}
-	os.Stdout.Sync()
+	oos.Stdout.Sync()
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
