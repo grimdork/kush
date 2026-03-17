@@ -99,7 +99,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		}
 	}
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
-		log.Debugf("TABDEBUG cols=%d ws.Col=%d", cols, ws.Col)
+		// use stderr so debug isn't mixed with stdout control sequences
+		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d\n", cols, ws.Col)
 	}
 	// compute max width of a candidate (limited)
 	maxw := 0
@@ -150,8 +151,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move to next line and clear
-	os.Stdout.WriteString("\r\n\x1b[2K\r")
+	// move down one line WITHOUT inserting a newline (use CSI 1B)
+	os.Stdout.WriteString("\r\x1b[1B\x1b[2K\r")
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -164,7 +165,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move back up to prompt line (absolute column 1)
+	// move back up to prompt line (absolute column 1) without inserting newlines
 	os.Stdout.WriteString("\r\x1b[1A")
 	// caller will restore prompt and cursor
 }
