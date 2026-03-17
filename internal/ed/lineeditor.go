@@ -2,6 +2,7 @@ package ed
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -135,8 +136,9 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
 	}
-	// save cursor state, position cursor to end of prompt: carriage return then move right promptLen columns
-	os.Stdout.WriteString("\x1b[s")
+	// save cursor state (DECSC), position cursor to end of prompt: carriage return then move right promptLen columns
+	// Use ESC7/ESC8 (DECSC/DECRC) for broader terminal compatibility in some environments.
+	os.Stdout.WriteString("\x1b7")
 	promptLen := len(prompt)
 	os.Stdout.WriteString("\r")
 	if promptLen > 0 {
@@ -148,42 +150,55 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString("\x1b[0J")
 	// clear both lines we'll overwrite and draw first row
 	os.Stdout.WriteString("\x1b[2K\r")
-	// first candidate row: collect indices for debug
+	// build both candidate rows and the prompt line into a single buffer to write atomically
+	bufw := &bytes.Buffer{}
+	// first row
 	row1 := []int{}
 	for i := start; i < start+perLine && i < end; i++ {
 		row1 = append(row1, i)
 		s := cands[i]
 		if i == ed.compIndex {
-			os.Stdout.WriteString(colWrap(s, true))
+			bufw.WriteString(colWrap(s, true))
 		} else {
-			os.Stdout.WriteString(s)
+			bufw.WriteString(s)
 		}
 		pad := colw - len(s)
 		for p := 0; p < pad; p++ {
-			os.Stdout.WriteString(" ")
+			bufw.WriteString(" ")
 		}
 	}
-	// flush stdout to ensure row1 is sent
-	os.Stdout.Sync()
-	// move down one line without inserting a newline, clear line
-	os.Stdout.WriteString("\x1b[1B\x1b[2K\r")
-	// second candidate row: collect indices for debug
+	// move to second row
+	bufw.WriteString("\x1b[1B\x1b[2K\r")
+	// second row
 	row2 := []int{}
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		row2 = append(row2, i)
 		s := cands[i]
 		if i == ed.compIndex {
-			os.Stdout.WriteString(colWrap(s, true))
+			bufw.WriteString(colWrap(s, true))
 		} else {
-			os.Stdout.WriteString(s)
+			bufw.WriteString(s)
 		}
 		pad := colw - len(s)
 		for p := 0; p < pad; p++ {
-			os.Stdout.WriteString(" ")
+			bufw.WriteString(" ")
 		}
 	}
-	// flush stdout to ensure row2 is sent
-	os.Stdout.Sync()
+	// draw page indicator at far right if more pages exist
+	if end < len(cands) {
+		bufw.WriteString("\r\x1b[" + fmt.Sprintf("%d", cols-3) + "C")
+		bufw.WriteString("»")
+	}
+	// finally move down one line and render prompt+buffer
+	bufw.WriteString("\x1b[1B\r\x1b[K")
+	bufw.WriteString(prompt)
+	bufw.WriteString(string(buf))
+	// write everything in one shot
+	os.Stdout.WriteString(bufw.String())
+	// debug rows to stderr
+	if os.Getenv("KUSH_KEYDEBUG") == "2" {
+		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
+	}
 	// draw page indicator at far right if more pages exist
 	if end < len(cands) {
 		// move to column cols-3 and write '>>'
