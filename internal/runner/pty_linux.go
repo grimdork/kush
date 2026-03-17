@@ -5,16 +5,15 @@ package runner
 
 import (
 	"fmt"
-	"os"
 
 	"golang.org/x/sys/unix"
 )
 
-// Linux implementation using posix_openpt / ioctl TIOCSPTLCK + TIOCGPTN.
+// Linux implementation using /dev/ptmx + ioctl TIOCSPTLCK + TIOCGPTN.
 func openpty() (masterFD, slaveFD int, err error) {
-	fd, err := unix.PosixOpenpt(unix.O_RDWR | unix.O_NOCTTY)
+	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY, 0)
 	if err != nil {
-		return 0, 0, fmt.Errorf("posix_openpt: %w", err)
+		return 0, 0, fmt.Errorf("open /dev/ptmx: %w", err)
 	}
 
 	// unlockpt: clear the lock

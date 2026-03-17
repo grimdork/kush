@@ -34,7 +34,7 @@ var helpTopics = map[string]string{
     %cyanalias%reset                         List all aliases
     %cyanalias%reset %cyan-r%reset                      Reload from disk
     %cyanalias%reset %cyanll='ls -la'%reset             Define an alias
-    %cyanalias%reset %cyngrep='grep --color'%reset     Colourised grep`,
+    %cyanalias%reset %cyangrep='grep --color'%reset     Colourised grep`,
 
 	"unalias": `%bold%lwhite unalias%reset %cyanname%reset
 
