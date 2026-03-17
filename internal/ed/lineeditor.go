@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/grimdork/kush/internal/completion"
@@ -151,74 +150,6 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString("\x1b[0J")
 	// clear both lines we'll overwrite and draw first row
 	os.Stdout.WriteString("\x1b[2K\r")
-	// Try a more robust DECSTBM: query the live cursor row (CSI 6n) to anchor the region exactly
-	// Send CSI 6n and read the terminal reply (ESC [ row ; col R) with a short timeout.
-	os.Stdout.WriteString("\x1b[6n")
-	var rows int = 0
-	{
-		reader := bufio.NewReader(os.Stdin)
-		respCh := make(chan string, 1)
-		go func() {
-			b := make([]byte, 0, 32)
-			for {
-				by, err := reader.ReadByte()
-				if err != nil {
-					return
-				}
-				b = append(b, by)
-				if by == 'R' {
-					respCh <- string(b)
-					return
-				}
-			}
-		}()
-		select {
-		case resp := <-respCh:
-			// expected format: ESC [ row ; col R
-			r := strings.TrimPrefix(resp, "\x1b[")
-			r = strings.TrimSuffix(r, "R")
-			parts := strings.Split(r, ";")
-			if len(parts) >= 1 {
-				if rowN, err := fmt.Sscanf(parts[0], "%d", &rows); rowN > 0 && err == nil {
-					// rows set via rows variable above
-				}
-			}
-		case <-time.After(50 * time.Millisecond):
-			// timeout; fall back to ioctl(TIOCGWINSZ)
-			var ws struct{ Row, Col, X, Y uint16 }
-			_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-			if errno == 0 && ws.Row > 0 {
-				rows = int(ws.Row)
-			}
-		}
-	}
-	if rows == 0 {
-		// fallback to ioctl if query failed
-		var ws struct{ Row, Col, X, Y uint16 }
-		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-		if errno == 0 && ws.Row > 0 {
-			rows = int(ws.Row)
-		}
-	}
-	if rows > 0 {
-		top := rows
-		if top < 1 {
-			top = 1
-		}
-		bottom := top + 2
-		// clamp
-		if bottom < top {
-			bottom = top
-		}
-		// ensure bottom does not exceed terminal rows
-		var ws2 struct{ Row, Col, X, Y uint16 }
-		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws2)))
-		if errno == 0 && ws2.Row > 0 && int(ws2.Row) < bottom {
-			bottom = int(ws2.Row)
-		}
-		// CSI <top>;<bottom> r
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d;%dr", top, bottom))
-	}
 	// build both candidate rows and the prompt line into a single buffer to write atomically
 	bufw := &bytes.Buffer{}
 	// first row
@@ -264,10 +195,6 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	bufw.WriteString(string(buf))
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
-	// restore saved cursor (DECRC) first, then restore full scroll region to avoid remapping saved coordinates
-	os.Stdout.WriteString("\x1b8")
-	// restore to full-screen scrolling region
-	os.Stdout.WriteString("\x1b[r")
 	// debug rows to stderr
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
@@ -276,10 +203,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	pos := len(prompt) + cursor
 	// absolute column move
 	os.Stdout.WriteString("\r")
-	if pos >= 0 {
-		// CSI nG is 1-indexed; we want the column after the prompt so add 1
-		col := pos + 1
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
+	if pos > 0 {
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
 	}
 	os.Stdout.Sync()
 }
