@@ -13,81 +13,99 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// RunShell runs the given command line inside a pseudoterminal so interactive
-// programs behave correctly. It falls back to a plain exec.Command if Openpty
-// is unavailable.
-func RunShell(line string) error {
-	// Save and restore terminal state for stdin to ensure we return the
-	// terminal to its previous mode after the child exits (fixes "shell
-	// broken after command returns" on macOS where PTY sessions can leave
-	// the tty in raw mode).
-	stdinFd := int(os.Stdin.Fd())
-	var old unix.Termios
-	if p, err := unix.IoctlGetTermios(stdinFd, unix.TIOCGETA); err == nil && p != nil {
-		old = *p
-		defer unix.IoctlSetTermios(stdinFd, unix.TIOCSETA, &old)
+// saveAndSetPassthrough puts the terminal into passthrough mode for PTY
+// forwarding: disables ICANON, ECHO, ISIG and IEXTEN so keypresses reach the
+// child immediately, but preserves OPOST so any stderr output (e.g. debug
+// logs) still gets proper CR+LF translation. Returns the previous termios for
+// restoration after the child exits.
+func saveAndSetPassthrough(fd int) (unix.Termios, error) {
+	p, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	if err != nil {
+		return unix.Termios{}, err
 	}
+	old := *p
 
-	// attempt to open a pty
-	var masterFd, slaveFd int
-	var err error
-	if masterFd, slaveFd, err = openpty(); err != nil {
-		// fallback to simple exec
-		log.Debugf("openpty failed, falling back to plain exec: %v", err)
-		return runShellFallback(line)
+	raw := old
+	raw.Lflag &^= unix.ICANON | unix.ECHO | unix.ECHONL | unix.ISIG | unix.IEXTEN
+	raw.Iflag &^= unix.ICRNL | unix.INLCR | unix.IGNCR | unix.IXON
+	// Leave Oflag untouched — OPOST must stay enabled.
+	raw.Cc[unix.VMIN] = 1
+	raw.Cc[unix.VTIME] = 0
+
+	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &raw); err != nil {
+		return old, err
 	}
-	defer unix.Close(masterFd)
-	defer unix.Close(slaveFd)
+	return old, nil
+}
+
+func restoreTermios(fd int, t unix.Termios) error {
+	return unix.IoctlSetTermios(fd, unix.TIOCSETA, &t)
+}
+
+// RunShell runs a command line inside a pseudoterminal so interactive programs
+// behave correctly. Falls back to a plain exec.Command when openpty is
+// unavailable (see pty_unsupported.go).
+func RunShell(line string) error {
+	masterFd, slaveFd, err := openpty()
+	if err != nil {
+		log.Debugf("openpty unavailable, using plain exec: %v", err)
+		return runPlain(line)
+	}
 
 	master := os.NewFile(uintptr(masterFd), "pty-master")
-	defer master.Close()
+	slave := os.NewFile(uintptr(slaveFd), "pty-slave")
 
-	// Start the user's shell with the slave side as its stdio.
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "sh"
 	}
-	cmd := exec.Command(shell, "-lc", line)
-	log.Debugf("starting shell via pty: %s -lc %q (masterfd=%d)", shell, line, masterFd)
-	// make the child a process group leader so we can signal the whole group
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	slave := os.NewFile(uintptr(slaveFd), "pty-slave")
-	defer slave.Close()
+	cmd := exec.Command(shell, "-lc", line)
+	log.Debugf("pty exec: %s -lc %q", shell, line)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
 
+	// Switch stdin to passthrough mode before starting the child.
+	stdinFd := int(os.Stdin.Fd())
+	oldTermios, termErr := saveAndSetPassthrough(stdinFd)
+	if termErr != nil {
+		log.Debugf("passthrough mode failed: %v", termErr)
+	}
+
 	if err := cmd.Start(); err != nil {
 		slave.Close()
 		master.Close()
+		if termErr == nil {
+			restoreTermios(stdinFd, oldTermios)
+		}
 		return err
 	}
 
-	// propagate window size once (best-effort)
+	// The child inherited the slave fd; close our copy so the master gets
+	// EOF/EIO promptly when the child exits.
+	slave.Close()
+
 	propagateWinSize(masterFd)
 
-	// Forward signals (SIGINT/SIGTERM/...) to child process group.
+	// Forward signals to the child's process group.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM, syscall.SIGTSTP)
 	go func() {
 		for s := range sigc {
-			// send signal to child process group
-			pgid, err := syscall.Getpgid(cmd.Process.Pid)
-			if err == nil {
-				syscall.Kill(-pgid, s.(syscall.Signal))
+			if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+				_ = syscall.Kill(-pgid, s.(syscall.Signal))
 			}
 		}
 	}()
 
-	// copy goroutines use a waitgroup so we can ensure they exit cleanly
-	// before returning. This avoids races where editor recreation and
-	// leftover goroutines both touch the terminal causing a frozen shell.
 	var wg sync.WaitGroup
-	done := make(chan struct{})
+	var lastByte byte
 
+	// Copy master → stdout. We wait on this goroutine to ensure all child
+	// output is flushed before returning.
 	wg.Add(1)
-	var lastByte byte = 0
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
@@ -100,67 +118,83 @@ func RunShell(line string) error {
 			if err != nil {
 				return
 			}
-			select {
-			case <-done:
-				return
-			default:
-			}
 		}
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				if _, werr := master.Write(buf[:n]); werr != nil {
+	// Copy stdin → master. Uses a dup'd fd with poll(2) so we can stop
+	// cleanly after the child exits without affecting the real stdin.
+	//
+	// We must not set O_NONBLOCK on the dup because dup'd fds share the
+	// underlying file description — non-blocking mode would leak to the
+	// original fd and break the editor's reads after we return.
+	done := make(chan struct{})
+	stdinDupFd, dupErr := syscall.Dup(stdinFd)
+	if dupErr != nil {
+		log.Debugf("dup(stdin) failed: %v; stdin forwarding disabled", dupErr)
+	} else {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer syscall.Close(stdinDupFd)
+			buf := make([]byte, 4096)
+			pollFds := []unix.PollFd{{Fd: int32(stdinDupFd), Events: unix.POLLIN}}
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				// 20 ms timeout keeps the loop responsive without busy-spinning.
+				n, err := unix.Poll(pollFds, 20)
+				if err == syscall.EINTR || n == 0 {
+					continue
+				}
+				if err != nil {
+					return
+				}
+				nr, rerr := syscall.Read(stdinDupFd, buf)
+				if nr > 0 {
+					if _, werr := master.Write(buf[:nr]); werr != nil {
+						return
+					}
+				}
+				if rerr != nil || nr == 0 {
 					return
 				}
 			}
-			if err != nil {
-				return
-			}
-			select {
-			case <-done:
-				return
-			default:
-			}
-		}
-	}()
-
-	// Wait for the child to exit.
-	err = cmd.Wait()
-	// small grace period to let IO drain
-	time.Sleep(20 * time.Millisecond)
-	// stop background copy goroutines and wait for them
-	close(done)
-	wg.Wait()
-	// if the child didn't end with a newline, emit one so the prompt starts
-	// on a fresh line — but only when necessary. We check lastByte captured
-	// from the master->stdout copy goroutine above. Log values at debug level
-	// to help diagnose lingering "press Enter" cases.
-	wrote := false
-	if lastByte != '\n' && lastByte != 0 {
-		if _, werr := os.Stdout.WriteString("\r\n"); werr != nil {
-			log.Debugf("failed to write trailing newline: %v", werr)
-		} else {
-			wrote = true
-		}
+		}()
 	}
-	log.Debugf("pty-runner: child exit, lastByte=%q wroteNewline=%v", lastByte, wrote)
+
+	// Wait for the child to exit, then tear down the copy goroutines.
+	err = cmd.Wait()
+	log.Debugf("child exited: %v", err)
+
+	time.Sleep(20 * time.Millisecond) // let remaining output drain through the PTY
+	close(done)                       // stop stdin→master polling
+	master.Close()                    // EOF for master→stdout
+	wg.Wait()
+
 	signal.Stop(sigc)
 	close(sigc)
+
+	if termErr == nil {
+		restoreTermios(stdinFd, oldTermios)
+	}
+
+	// Ensure the next prompt starts on a fresh line.
+	if lastByte != '\n' && lastByte != 0 {
+		os.Stdout.WriteString("\r\n")
+	}
+
 	return err
 }
 
-func runShellFallback(line string) error {
-	// Save/restore stdin termios here too.
+// runPlain runs a command without a PTY, used as fallback when openpty is
+// unavailable.
+func runPlain(line string) error {
 	stdinFd := int(os.Stdin.Fd())
-	var old unix.Termios
 	if p, err := unix.IoctlGetTermios(stdinFd, unix.TIOCGETA); err == nil && p != nil {
-		old = *p
+		old := *p
 		defer unix.IoctlSetTermios(stdinFd, unix.TIOCSETA, &old)
 	}
 
@@ -168,6 +202,7 @@ func runShellFallback(line string) error {
 	if shell == "" {
 		shell = "sh"
 	}
+
 	cmd := exec.Command(shell, "-lc", line)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -177,8 +212,7 @@ func runShellFallback(line string) error {
 }
 
 func propagateWinSize(masterFd int) {
-	// No-op for now; proper winsize propagation will be added with a full
-	// openpty implementation.
+	// TODO: copy the real terminal's winsize to the PTY master and listen
+	// for SIGWINCH to keep it in sync.
 	_ = masterFd
-	return
 }
