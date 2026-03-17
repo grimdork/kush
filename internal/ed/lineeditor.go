@@ -196,6 +196,13 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	// move back up to prompt line and restore prompt+cursor
 	os.Stdout.WriteString("\x1b[1A")
 	renderLine(prompt, buf, cursor)
+	// ensure cursor is positioned inside the prompt at len(prompt)+cursor
+	pos := len(prompt) + cursor
+	os.Stdout.WriteString("\r")
+	if pos > 0 {
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "C")
+	}
+	os.Stdout.Sync()
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
