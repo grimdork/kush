@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package lineeditor
+package ed
 
 import (
 	"golang.org/x/sys/unix"

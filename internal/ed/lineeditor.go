@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/grimdork/kush/internal/log"
 )
 
 // ErrEOF is returned when the user signals end-of-input (e.g. Ctrl+D).
@@ -91,7 +93,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			return "", err
 		}
 		if keyDebug {
-			fmt.Fprintf(os.Stderr, "KEY read rune=%q code=%d hex=%x\n", r, r, []byte(string(r)))
+			log.Debugf("KEY read rune=%q code=%d hex=%x", r, r, []byte(string(r)))
 		}
 
 		// Ctrl+D

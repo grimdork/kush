@@ -1,7 +1,7 @@
 //go:build darwin
 // +build darwin
 
-package lineeditor
+package ed
 
 import (
 	"golang.org/x/sys/unix"
