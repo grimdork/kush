@@ -150,11 +150,49 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString("\x1b[0J")
 	// clear both lines we'll overwrite and draw first row
 	os.Stdout.WriteString("\x1b[2K\r")
-	// Attempt defensive DECSTBM: restrict scroll region to the bottom 3 lines
-	// so the terminal treats our writes as in-place updates instead of new output.
-	// Fetch terminal rows (we already attempted cols earlier; reuse ws)
+	// Try a more robust DECSTBM: query the live cursor row (CSI 6n) to anchor the region exactly
+	// Send CSI 6n and read the terminal reply (ESC [ row ; col R) with a short timeout.
+	os.Stdout.WriteString("\x1b[6n")
 	var rows int = 0
 	{
+		reader := bufio.NewReader(os.Stdin)
+		respCh := make(chan string, 1)
+		go func() {
+			b := make([]byte, 0, 32)
+			for {
+				by, err := reader.ReadByte()
+				if err != nil {
+					return
+				}
+				b = append(b, by)
+				if by == 'R' {
+					respCh <- string(b)
+					return
+				}
+			}
+		}()
+		select {
+		case resp := <-respCh:
+			// expected format: ESC [ row ; col R
+			r := strings.TrimPrefix(resp, "\x1b[")
+			r = strings.TrimSuffix(r, "R")
+			parts := strings.Split(r, ";")
+			if len(parts) >= 1 {
+				if rowN, err := fmt.Sscanf(parts[0], "%d", &rows); rowN > 0 && err == nil {
+					// rows set via rows variable above
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+			// timeout; fall back to ioctl(TIOCGWINSZ)
+			var ws struct{ Row, Col, X, Y uint16 }
+			_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+			if errno == 0 && ws.Row > 0 {
+				rows = int(ws.Row)
+			}
+		}
+	}
+	if rows == 0 {
+		// fallback to ioctl if query failed
 		var ws struct{ Row, Col, X, Y uint16 }
 		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
 		if errno == 0 && ws.Row > 0 {
@@ -162,11 +200,21 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		}
 	}
 	if rows > 0 {
-		top := rows - 2
+		top := rows
 		if top < 1 {
 			top = 1
 		}
-		bottom := rows
+		bottom := top + 2
+		// clamp
+		if bottom < top {
+			bottom = top
+		}
+		// ensure bottom does not exceed terminal rows
+		var ws2 struct{ Row, Col, X, Y uint16 }
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws2)))
+		if errno == 0 && ws2.Row > 0 && int(ws2.Row) < bottom {
+			bottom = int(ws2.Row)
+		}
 		// CSI <top>;<bottom> r
 		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d;%dr", top, bottom))
 	}
