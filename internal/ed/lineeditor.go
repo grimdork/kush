@@ -25,6 +25,7 @@ type Editor struct {
 	compStart      int
 	compCandidates []string
 	compIndex      int
+	compPageStart  int
 }
 
 // Close is a no-op for the simple ANSI editor (kept for API compatibility).
@@ -74,6 +75,85 @@ func renderLine(prompt string, buf []rune, cursor int) {
 	if pos > 0 {
 		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "C")
 	}
+}
+
+// renderCandidates prints two lines of candidates below the prompt, highlighting
+// the current selection with inverse-video. It attempts simple one-column-per-choice layout.
+func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
+	cands := ed.compCandidates
+	if len(cands) == 0 {
+		return
+	}
+	// get terminal width from env fallback
+	cols := 80
+	if v := os.Getenv("COLUMNS"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			cols = n
+		}
+	}
+	// compute max width of a candidate (limited)
+	maxw := 0
+	for _, c := range cands {
+		if w := len(c); w > maxw {
+			maxw = w
+		}
+	}
+	if maxw == 0 {
+		maxw = 1
+	}
+	// one candidate per column (no wrapping of choice text). column width = maxw + 2
+	colw := maxw + 2
+	perLine := cols / colw
+	if perLine < 1 {
+		perLine = 1
+	}
+	// total visible = perLine * 2
+	visible := perLine * 2
+	if ed.compPageStart < 0 {
+		ed.compPageStart = 0
+	}
+	if ed.compPageStart >= len(cands) {
+		ed.compPageStart = 0
+	}
+	start := ed.compPageStart
+	end := start + visible
+	if end > len(cands) {
+		end = len(cands)
+	}
+	// print newline then two lines
+	os.Stdout.WriteString("\r\n")
+	// first line
+	for i := start; i < start+perLine && i < end; i++ {
+		s := cands[i]
+		if i == ed.compIndex {
+			// inverse video
+			os.Stdout.WriteString("\x1b[7m" + s + "\x1b[0m")
+		} else {
+			os.Stdout.WriteString(s)
+		}
+		// pad to column width
+		pad := colw - len(s)
+		for p := 0; p < pad; p++ {
+			os.Stdout.WriteString(" ")
+		}
+	}
+	os.Stdout.WriteString("\r\n")
+	// second line
+	for i := start + perLine; i < start+2*perLine && i < end; i++ {
+		s := cands[i]
+		if i == ed.compIndex {
+			os.Stdout.WriteString("\x1b[7m" + s + "\x1b[0m")
+		} else {
+			os.Stdout.WriteString(s)
+		}
+		pad := colw - len(s)
+		for p := 0; p < pad; p++ {
+			os.Stdout.WriteString(" ")
+		}
+	}
+	os.Stdout.WriteString("\r\n")
+	renderLine(prompt, buf, cursor)
 }
 
 // Prompt reads a single line from stdin with minimal editing capabilities.
@@ -164,6 +244,50 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			if r1 == '[' {
 				r2, _, err := reader.ReadRune()
 				if err != nil {
+					continue
+				}
+
+				// handle Shift+Tab (ESC [ Z)
+				if r2 == 'Z' {
+					if ed.compCandidates != nil && len(ed.compCandidates) > 0 {
+						if ed.compIndex > 0 {
+							ed.compIndex--
+						} else {
+							ed.compIndex = len(ed.compCandidates) - 1
+						}
+						// page so index is visible
+						perLine := 1
+						// compute perLine same way as renderCandidates
+						cols := 80
+						if v := os.Getenv("COLUMNS"); v != "" {
+							var n int
+							if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+								cols = n
+							}
+						}
+						maxw := 0
+						for _, c := range ed.compCandidates {
+							if l := len(c); l > maxw {
+								maxw = l
+							}
+						}
+						if maxw == 0 {
+							maxw = 1
+						}
+						colw := maxw + 2
+						if c := cols / colw; c >= 1 {
+							perLine = c
+						}
+						visible := perLine * 2
+						// adjust page start so compIndex lies within [pageStart, pageStart+visible)
+						if ed.compIndex < ed.compPageStart {
+							ed.compPageStart = ed.compIndex
+						} else if ed.compIndex >= ed.compPageStart+visible {
+							ed.compPageStart = ed.compIndex - (ed.compIndex % visible)
+						}
+						// redraw candidates
+						ed.renderCandidates(prompt, buf, cursor)
+					}
 					continue
 				}
 
@@ -352,6 +476,35 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			// If we have an existing candidate list and same start, cycle
 			if ed.compCandidates != nil && ed.compStart == start && len(ed.compCandidates) > 0 {
 				ed.compIndex = (ed.compIndex + 1) % len(ed.compCandidates)
+				// ensure page contains index
+				// compute perLine similar to renderCandidates
+				cols := 80
+				if v := os.Getenv("COLUMNS"); v != "" {
+					var n int
+					if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+						cols = n
+					}
+				}
+				maxw := 0
+				for _, c := range ed.compCandidates {
+					if l := len(c); l > maxw {
+						maxw = l
+					}
+				}
+				if maxw == 0 {
+					maxw = 1
+				}
+				colw := maxw + 2
+				perLine := cols / colw
+				if perLine < 1 {
+					perLine = 1
+				}
+				visible := perLine * 2
+				if ed.compIndex < ed.compPageStart {
+					ed.compPageStart = ed.compIndex
+				} else if ed.compIndex >= ed.compPageStart+visible {
+					ed.compPageStart = ed.compIndex - (ed.compIndex % visible)
+				}
 				cand := ed.compCandidates[ed.compIndex]
 				// replace buffer from start..cursor with cand
 				newBuf := []rune(cand)
@@ -363,12 +516,15 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				buf = newLine
 				cursor = start + len(newBuf)
 				renderLine(prompt, buf, cursor)
+				// redraw candidate page below
+				ed.renderCandidates(prompt, buf, cursor)
 				continue
 			}
 			// fresh candidate list
 			ed.compCandidates = cands
 			ed.compStart = start
 			ed.compIndex = 0
+			ed.compPageStart = 0
 			if len(cands) == 1 {
 				// single candidate -> insert with trailing space if appropriate
 				cand := cands[0]
@@ -382,19 +538,17 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				renderLine(prompt, buf, cursor)
 				continue
 			}
-			// multiple candidates: show list and leave buffer unchanged
-			// print below prompt
-			os.Stdout.WriteString("\r\n")
-			for _, c := range cands {
-				os.Stdout.WriteString(c + "\t")
-			}
-			os.Stdout.WriteString("\r\n")
-			renderLine(prompt, buf, cursor)
+			// multiple candidates: show two-line page and leave buffer unchanged
+			ed.renderCandidates(prompt, buf, cursor)
 			continue
 		}
 
 		// printable runes (>= space)
 		if r >= 32 {
+			// any normal keypress resets completion state
+			ed.compCandidates = nil
+			ed.compIndex = 0
+			ed.compPageStart = 0
 			if cursor == len(buf) {
 				buf = append(buf, r)
 			} else {
