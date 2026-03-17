@@ -135,7 +135,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
 	}
-	// position cursor to end of prompt: carriage return then move right promptLen columns
+	// save cursor state, position cursor to end of prompt: carriage return then move right promptLen columns
+	os.Stdout.WriteString("\x1b[s")
 	promptLen := len(prompt)
 	os.Stdout.WriteString("\r")
 	if promptLen > 0 {
@@ -197,6 +198,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString("\x1b[1A")
 	renderLine(prompt, buf, cursor)
 	// ensure cursor is positioned inside the prompt at len(prompt)+cursor
+	// restore saved cursor state then explicitly move inside prompt
+	os.Stdout.WriteString("\x1b[u")
 	pos := len(prompt) + cursor
 	os.Stdout.WriteString("\r")
 	if pos > 0 {
