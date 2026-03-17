@@ -215,19 +215,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	bufw.WriteString(string(buf))
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
-	// restore full scroll region if we changed it, then restore cursor
-	var rows int = 0
-	{
-		var ws struct{ Row, Col, X, Y uint16 }
-		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-		if errno == 0 && ws.Row > 0 {
-			rows = int(ws.Row)
-		}
-	}
-	if rows > 0 {
-		// restore to full-screen scrolling region
-		os.Stdout.WriteString("\x1b[r")
-	}
+	// restore full scroll region (unconditionally) and restore cursor
+	os.Stdout.WriteString("\x1b[r")
 	// restore saved cursor (DECRC)
 	os.Stdout.WriteString("\x1b8")
 	// debug rows to stderr
