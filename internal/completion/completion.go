@@ -1,7 +1,6 @@
 package completion
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
