@@ -12,8 +12,10 @@ import (
 	"github.com/grimdork/kush/internal/log"
 )
 
+// Builtins provides handling for built-in commands that are executed directly by the shell rather than via exec.
 type Builtins struct{}
 
+// New returns a new Builtins instance. Currently there is no state, but this allows for future expansion if needed.
 func New() *Builtins { return &Builtins{} }
 
 // Handle returns true if the line was handled by a builtin.
