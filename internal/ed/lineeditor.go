@@ -341,6 +341,58 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			continue
 		}
 
+		// Tab completion
+		if r == 9 {
+			// call completer
+			start, cands := completion.Complete(string(buf), cursor)
+			if len(cands) == 0 {
+				// nothing
+				continue
+			}
+			// If we have an existing candidate list and same start, cycle
+			if ed.compCandidates != nil && ed.compStart == start && len(ed.compCandidates) > 0 {
+				ed.compIndex = (ed.compIndex + 1) % len(ed.compCandidates)
+				cand := ed.compCandidates[ed.compIndex]
+				// replace buffer from start..cursor with cand
+				newBuf := []rune(cand)
+				newLine := append([]rune(string(buf[:start])), newBuf...)
+				// append rest of original after cursor
+				if cursor < len(buf) {
+					newLine = append(newLine, buf[cursor:]...)
+				}
+				buf = newLine
+				cursor = start + len(newBuf)
+				renderLine(prompt, buf, cursor)
+				continue
+			}
+			// fresh candidate list
+			ed.compCandidates = cands
+			ed.compStart = start
+			ed.compIndex = 0
+			if len(cands) == 1 {
+				// single candidate -> insert with trailing space if appropriate
+				cand := cands[0]
+				newBuf := []rune(cand + " ")
+				newLine := append([]rune(string(buf[:start])), newBuf...)
+				if cursor < len(buf) {
+					newLine = append(newLine, buf[cursor:]...)
+				}
+				buf = newLine
+				cursor = start + len(newBuf)
+				renderLine(prompt, buf, cursor)
+				continue
+			}
+			// multiple candidates: show list and leave buffer unchanged
+			// print below prompt
+			os.Stdout.WriteString("\r\n")
+			for _, c := range cands {
+				os.Stdout.WriteString(c + "\t")
+			}
+			os.Stdout.WriteString("\r\n")
+			renderLine(prompt, buf, cursor)
+			continue
+		}
+
 		// printable runes (>= space)
 		if r >= 32 {
 			if cursor == len(buf) {
