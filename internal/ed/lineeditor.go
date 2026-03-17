@@ -98,6 +98,9 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			cols = n
 		}
 	}
+	if os.Getenv("KUSH_KEYDEBUG") == "2" {
+		log.Debugf("TABDEBUG cols=%d ws.Col=%d", cols, ws.Col)
+	}
 	// compute max width of a candidate (limited)
 	maxw := 0
 	for _, c := range cands {
@@ -127,13 +130,14 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if end > len(cands) {
 		end = len(cands)
 	}
-	// draw in-place deterministically: move to line below prompt, overwrite two lines, then restore prompt
-	// Move to start of prompt line and then down one line.
-	os.Stdout.WriteString("\r")
-	// move down one line
+	// draw in-place deterministically using absolute positioning: move to prompt column 0, then to the start of the candidate area
+	// Move to column 1
+	os.Stdout.WriteString("\r\x1b[1G")
+	// move down one line to candidates area
 	os.Stdout.WriteString("\x1b[1B")
-	// write first line (clear first)
-	os.Stdout.WriteString("\x1b[2K")
+	// always clear first candidate line
+	os.Stdout.WriteString("\x1b[2K\r")
+	// compute absolute column cursor: start at column 1 for candidates
 	for i := start; i < start+perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -146,10 +150,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move to next line
-	os.Stdout.WriteString("\r\n")
-	// write second line (clear)
-	os.Stdout.WriteString("\x1b[2K")
+	// move to next line and clear
+	os.Stdout.WriteString("\r\n\x1b[2K\r")
 	for i := start + perLine; i < start+2*perLine && i < end; i++ {
 		s := cands[i]
 		if i == ed.compIndex {
@@ -162,7 +164,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			os.Stdout.WriteString(" ")
 		}
 	}
-	// move back up to prompt line
+	// move back up to prompt line (absolute column 1)
 	os.Stdout.WriteString("\r\x1b[1A")
 	// caller will restore prompt and cursor
 }
