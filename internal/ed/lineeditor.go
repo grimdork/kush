@@ -73,10 +73,10 @@ func renderLine(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString(string(buf))
 	// move cursor to position after prompt+cursor
 	pos := len(prompt) + cursor
-	// move to column pos: write \r then forward
+	// move to column pos: write \r then forward (use CSI nG for absolute column)
 	os.Stdout.WriteString("\r")
 	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "C")
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
 	}
 }
 
@@ -219,7 +219,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	pos := len(prompt) + cursor
 	os.Stdout.WriteString("\r")
 	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "C")
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
 	}
 	os.Stdout.Sync()
 }
