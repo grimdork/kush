@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package runner
 
 import (
@@ -40,10 +43,6 @@ func saveAndSetPassthrough(fd int) (unix.Termios, error) {
 
 func restoreTermios(fd int, t unix.Termios) error {
 	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
-}
-
-func restoreTermios(fd int, t unix.Termios) error {
-	return unix.IoctlSetTermios(fd, unix.TIOCSETA, &t)
 }
 
 // RunShell runs a command line inside a pseudoterminal so interactive programs
@@ -197,9 +196,9 @@ func RunShell(line string) error {
 // unavailable.
 func runPlain(line string) error {
 	stdinFd := int(os.Stdin.Fd())
-	if p, err := unix.IoctlGetTermios(stdinFd, unix.TIOCGETA); err == nil && p != nil {
+	if p, err := unix.IoctlGetTermios(stdinFd, unix.TCGETS); err == nil && p != nil {
 		old := *p
-		defer unix.IoctlSetTermios(stdinFd, unix.TIOCSETA, &old)
+		defer unix.IoctlSetTermios(stdinFd, unix.TCSETS, &old)
 	}
 
 	shell := os.Getenv("SHELL")
