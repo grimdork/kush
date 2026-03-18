@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -69,6 +70,26 @@ func (ed *Editor) appendHistory(line string) {
 	}
 	defer f.Close()
 	f.WriteString(line + "\n")
+}
+
+var ansiRE = regexp.MustCompile("\\x1b\\[[0-9;]*[a-zA-Z]")
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
+
+// ensureCursor moves the terminal cursor to the absolute column corresponding
+// to len(stripANSI(prompt)) + cursor and optionally logs debug info.
+func ensureCursor(prompt string, buf []rune, cursor int) {
+	visiblePrompt := stripANSI(prompt)
+	pos := len([]rune(visiblePrompt)) + cursor
+	os.Stdout.WriteString("\r")
+	if pos > 0 {
+		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
+	}
+	if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
+		fmt.Fprintf(os.Stderr, "CURDEBUG visiblePrompt=%q promptLen=%d cursor=%d pos=%d\n", visiblePrompt, len([]rune(visiblePrompt)), cursor, pos)
+	}
 }
 
 // renderLine redraws the prompt and buffer, positioning cursor.
@@ -206,7 +227,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		b.WriteString(showPrompt)
 		if firstPreview != "" {
 			b.WriteString(" ")
-			b.WriteString(firstPreview)
+			b.WriteString(firstPreview) // plain-text preview
 		}
 		// restore cursor
 		b.WriteString("\x1b8")
@@ -228,6 +249,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		}
 		// redraw prompt explicitly
 		renderLine(prompt, buf, cursor)
+		ensureCursor(prompt, buf, cursor)
 		return
 	}
 
@@ -281,11 +303,12 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
 	}
 	// Decide whether it's safe to print above the prompt. Use ws.Row (terminal
-	// height) as a heuristic: if there are at least 3 rows, we assume room above
-	// to write two rows without hitting top-of-screen clamping. Otherwise fall
-	// back to the downward conservative render (write after the prompt).
+	// height) as a heuristic: require enough rows so the full block can be placed
+	// above without hitting top-of-screen clamping. blockHeight is number of rows
+	// we need above the prompt (two rows for candidates).
+	blockHeight := 2
 	canAbove := false
-	if ws.Row >= 3 {
+	if ws.Row >= uint16(blockHeight+2) {
 		canAbove = true
 	}
 	// build buffer depending on above/below choice
@@ -342,7 +365,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		bufw.WriteString(showPrompt)
 		if firstPreview != "" {
 			bufw.WriteString(" ")
-			bufw.WriteString(firstPreview)
+			bufw.WriteString(firstPreview) // plain-text preview
 		}
 		bufw.WriteString("\x1b8")
 	} else {
@@ -404,7 +427,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		bufw.WriteString(showPrompt)
 		if firstPreview != "" {
 			bufw.WriteString(" ")
-			bufw.WriteString(firstPreview)
+			bufw.WriteString(firstPreview) // plain-text preview
 		}
 	}
 	// write everything in one shot
@@ -414,12 +437,7 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
 	}
 	// finally ensure cursor is positioned inside the prompt at len(prompt)+cursor
-	pos := len(prompt) + cursor
-	// absolute column move
-	os.Stdout.WriteString("\r")
-	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
-	}
+	ensureCursor(prompt, buf, cursor)
 	os.Stdout.Sync()
 }
 
@@ -450,7 +468,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 	cursor := 0
 	histIdx := len(ed.history)
 	reader := bufio.NewReader(os.Stdin)
-	keyDebug := os.Getenv("KUSH_KEYDEBUG") == "1"
+	keyDebug := os.Getenv("KUSH_KEYDEBUG") == "1" || os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3"
 	renderLine(prompt, buf, cursor)
 
 	for {
@@ -573,6 +591,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						// redraw candidates
 						ed.renderCandidates(prompt, buf, cursor)
 						renderLine(prompt, buf, cursor)
+						ensureCursor(prompt, buf, cursor)
 					}
 					continue
 				}
@@ -637,6 +656,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						break
 					}
 					renderLine(prompt, buf, cursor)
+					ensureCursor(prompt, buf, cursor)
 					continue
 				}
 				switch r2 {
@@ -672,6 +692,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 					// ignore
 				}
 				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
 				continue
 			} else if r1 == 'O' {
 				// some terminals send ESC O H/F for home/end
@@ -684,6 +705,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 					}
 				}
 				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
 				continue
 			} else {
 				// Alt/meta + key (single-rune after ESC)
@@ -737,6 +759,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 					// ignore other alt combos
 				}
 				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
 				continue
 			}
 		}
@@ -747,6 +770,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				buf = append(buf[:cursor-1], buf[cursor:]...)
 				cursor--
 				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
 			}
 			continue
 		}
@@ -806,6 +830,8 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				buf = newLine
 				cursor = start + len(newBuf)
 				renderLine(prompt, buf, cursor)
+				// deterministic reposition and debug
+				ensureCursor(prompt, buf, cursor)
 				// redraw candidate page below
 				ed.renderCandidates(prompt, buf, cursor)
 				continue
@@ -826,11 +852,13 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				buf = newLine
 				cursor = start + len(newBuf)
 				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
 				continue
 			}
 			// multiple candidates: show two-line page and leave buffer unchanged
 			ed.renderCandidates(prompt, buf, cursor)
 			renderLine(prompt, buf, cursor)
+			ensureCursor(prompt, buf, cursor)
 			continue
 		}
 
@@ -848,6 +876,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			}
 			cursor++
 			renderLine(prompt, buf, cursor)
+			ensureCursor(prompt, buf, cursor)
 			continue
 		}
 		// ignore others
