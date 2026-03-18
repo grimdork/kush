@@ -1,0 +1,93 @@
+version: 2
+project_name: kush
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: client
+    dir: .
+    main: .
+    binary: kush
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.date={{.CommitDate}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+
+release:
+  prerelease: true
+
+archives:
+  - wrap_in_directory: true
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# Homebrew (v2 schema)
+brews:
+  - name: kush
+    repository:
+      owner: grimdork
+      name: homebrew-tools
+    commit_author:
+      name: grimdork
+      email: github@grimdork.net
+    homepage: "https://github.com/grimdork/kush"
+    description: "A tiny custom shell written in Go"
+    license: MIT
+
+# NFPM (packaging) — conservative v2 fields
+nfpms:
+  - package_name: kush
+    vendor: "grimdork.net"
+    maintainer: "Grimdork <github@grimdork.net>"
+    homepage: "https://github.com/grimdork/kush"
+    description: "A tiny custom shell written in Go"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: "/usr/bin"
+    section: contrib
+    priority: extra
+    contents:
+      - src: LICENSE
+        dst: "/usr/share/doc/kush/LICENSE"
+      - src: README.md
+        dst: "/usr/share/doc/kush/README.md"
+
+# Binary signing (v2: BinarySign)
+signs:
+  - id: gpg-sign
+    cmd: gpg
+    args:
+      - --batch
+      - --pinentry-mode
+      - loopback
+      - --local-user
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+    artifacts: binary
