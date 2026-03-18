@@ -127,40 +127,69 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		if start < 0 {
 			start = 0
 		}
-		end := start + perLine*2
+		// ensure we always write exactly two rows worth of slots (pad with clears)
+		totalSlots := perLine * 2
+		end := start + totalSlots
 		if end > len(cands) {
 			end = len(cands)
 		}
-		// build conservative text
+		// build conservative text: explicitly clear and pad lines so every redraw is full
 		b := &bytes.Buffer{}
 		b.WriteString("\r\n")
-		for i := start; i < start+perLine && i < end; i++ {
-			s := cands[i]
-			if i == ed.compIndex {
-				b.WriteString(colWrap(s, true))
+		// first row: ensure we iterate exactly perLine slots
+		for idx := 0; idx < perLine; idx++ {
+			i := start + idx
+			// clear line start
+			b.WriteString("\x1b[2K\r")
+			if i < end {
+				s := cands[i]
+				if i == ed.compIndex {
+					b.WriteString(colWrap(s, true))
+				} else {
+					b.WriteString(s)
+				}
+				pad := colw - len(s)
+				for p := 0; p < pad; p++ {
+					b.WriteString(" ")
+				}
 			} else {
-				b.WriteString(s)
-			}
-			pad := colw - len(s)
-			for p := 0; p < pad; p++ {
-				b.WriteString(" ")
+				// pad empty slot
+				for p := 0; p < colw; p++ {
+					b.WriteString(" ")
+				}
 			}
 		}
 		b.WriteString("\r\n")
-		for i := start + perLine; i < start+2*perLine && i < end; i++ {
-			s := cands[i]
-			if i == ed.compIndex {
-				b.WriteString(colWrap(s, true))
+		// second row
+		for idx := 0; idx < perLine; idx++ {
+			i := start + perLine + idx
+			b.WriteString("\x1b[2K\r")
+			if i < end {
+				s := cands[i]
+				if i == ed.compIndex {
+					b.WriteString(colWrap(s, true))
+				} else {
+					b.WriteString(s)
+				}
+				pad := colw - len(s)
+				for p := 0; p < pad; p++ {
+					b.WriteString(" ")
+				}
 			} else {
-				b.WriteString(s)
-			}
-			pad := colw - len(s)
-			for p := 0; p < pad; p++ {
-				b.WriteString(" ")
+				for p := 0; p < colw; p++ {
+					b.WriteString(" ")
+				}
 			}
 		}
-		// write conservative block and redraw prompt
+		// ensure rest of screen below is cleared to avoid residual junk
+		b.WriteString("\x1b[0J")
+		// write conservative block atomically
 		os.Stdout.WriteString(b.String())
+		// debug buffer length
+		if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
+			fmt.Fprintf(os.Stderr, "TABDEBUG conservative write len=%d slots=%d perLine=%d start=%d end=%d compIndex=%d\n", b.Len(), totalSlots, perLine, start, end, ed.compIndex)
+		}
+		// redraw prompt explicitly
 		renderLine(prompt, buf, cursor)
 		return
 	}
