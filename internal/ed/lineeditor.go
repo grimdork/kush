@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/grimdork/kush/internal/completion"
@@ -86,13 +85,11 @@ func stripANSI(s string) string {
 // to len(stripANSI(prompt)) + cursor and optionally logs debug info.
 func ensureCursor(prompt string, buf []rune, cursor int) {
 	visiblePrompt := stripANSI(prompt)
-	pos := len([]rune(visiblePrompt)) + cursor
+	col := len([]rune(visiblePrompt)) + cursor + 1 // CSI G is 1-based
 	os.Stdout.WriteString("\r")
-	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
-	}
+	os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
 	if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
-		fmt.Fprintf(os.Stderr, "CURDEBUG visiblePrompt=%q promptLen=%d cursor=%d pos=%d\n", visiblePrompt, len([]rune(visiblePrompt)), cursor, pos)
+		fmt.Fprintf(os.Stderr, "CURDEBUG visiblePrompt=%q promptLen=%d cursor=%d col=%d\n", visiblePrompt, len([]rune(visiblePrompt)), cursor, col)
 	}
 }
 
@@ -103,199 +100,16 @@ func renderLine(prompt string, buf []rune, cursor int) {
 	os.Stdout.WriteString(prompt)
 	os.Stdout.WriteString(string(buf))
 	// move cursor to position after prompt+cursor
-	pos := len(prompt) + cursor
-	// move to column pos: write \r then forward (use CSI nG for absolute column)
+	// Use visible prompt width (stripANSI) so ANSI colouring doesn't confuse column math
+	visiblePrompt := stripANSI(prompt)
+	col := len([]rune(visiblePrompt)) + cursor + 1 // CSI G is 1-based
+	// move to column col: write \r then absolute column (CSI nG)
 	os.Stdout.WriteString("\r")
-	if pos > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", pos) + "G")
-	}
+	os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", col) + "G")
 }
 
-// renderCandidates prints two lines of candidates below the prompt, highlighting
-// the current selection with inverse-video. It attempts simple one-column-per-choice layout.
-func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
-	cands := ed.compCandidates
-	if len(cands) == 0 {
-		return
-	}
-	// If we're already in completion mode, reuse the displayed candidate rows:
-	// only update the prompt preview/highlight without reflowing the block.
-	if ed.inCompletion {
-		// redraw prompt preview (plain-text) and position cursor
-		showPrompt := prompt
-		firstPreview := ""
-		if len(cands) > 0 {
-			firstPreview = cands[ed.compIndex]
-		}
-		// build preview string so we can optionally dump exact bytes under deep debug
-		previewBuf := &bytes.Buffer{}
-		previewBuf.WriteString("\r\x1b[K")
-		previewBuf.WriteString(showPrompt)
-		if firstPreview != "" {
-			previewBuf.WriteString(" ")
-			previewBuf.WriteString(firstPreview)
-		}
-		previewStr := previewBuf.String()
-		if os.Getenv("KUSH_KEYDEBUG") == "3" {
-			// escape bytes for stderr-safe capture
-			esc := make([]byte, 0, len(previewStr)*4)
-			for _, c := range []byte(previewStr) {
-				esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
-			}
-			fmt.Fprintf(os.Stderr, "TABDEBUG preview rawlen=%d escaped=%s\n", len(previewStr), string(esc))
-		}
-		os.Stdout.WriteString(previewStr)
-		renderLine(prompt, buf, cursor)
-		ensureCursor(prompt, buf, cursor)
-		return
-	}
-	// If session-level disable is set, fall back to a conservative simple render
-	// that avoids any scroll-region or DECSC/DECRC manipulation which have
-	// exhibited terminal-driver races on some environments.
-	if ed.disableDECSTBM {
-		// simple conservative render: write a newline, two compact rows, then redraw prompt
-		cols := 80
-		var ws struct{ Row, Col, X, Y uint16 }
-		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-		if errno == 0 && ws.Col > 0 {
-			cols = int(ws.Col)
-		} else if v := os.Getenv("COLUMNS"); v != "" {
-			var n int
-			if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
-				cols = n
-			}
-		}
-		maxw := 0
-		for _, c := range cands {
-			if w := len(c); w > maxw {
-				maxw = w
-			}
-		}
-		if maxw == 0 {
-			maxw = 1
-		}
-		colw := maxw + 2
-		perLine := cols / colw
-		if perLine < 1 {
-			perLine = 1
-		}
-		start := ed.compPageStart
-		if start < 0 {
-			start = 0
-		}
-		// ensure we always write exactly two rows worth of slots (pad with clears)
-		totalSlots := perLine * 2
-		end := start + totalSlots
-		if end > len(cands) {
-			end = len(cands)
-		}
-		// build conservative text: explicitly clear and pad lines so every redraw is full
-		b := &bytes.Buffer{}
-		// We want candidates printed ABOVE the current prompt. Save cursor, move up two
-		// lines, write the two candidate rows, then move back to prompt line and
-		// print a refreshed prompt with the first candidate shown after the prompt
-		// (visual-only; buffer is unchanged).
-		b.WriteString("\x1b7") // save
-		// move up two lines (if at top this will clamp)
-		b.WriteString("\x1b[2A")
-		// first candidate row: build full line then write once
-		for row := 0; row < 1; row++ {
-			lineBuf := &bytes.Buffer{}
-			for idx := 0; idx < perLine; idx++ {
-				i := start + idx
-				if i < end {
-					s := cands[i]
-					if i == ed.compIndex {
-						lineBuf.WriteString(colWrap(s, true))
-					} else {
-						lineBuf.WriteString(s)
-					}
-					pad := colw - len(s)
-					for p := 0; p < pad; p++ {
-						lineBuf.WriteString(" ")
-					}
-				} else {
-					for p := 0; p < colw; p++ {
-						lineBuf.WriteString(" ")
-					}
-				}
-			}
-			b.WriteString("\x1b[2K\r")
-			b.WriteString(lineBuf.String())
-		}
-		// move to next line and write second row similarly
-		b.WriteString("\x1b[1B")
-		lineBuf2 := &bytes.Buffer{}
-		for idx := 0; idx < perLine; idx++ {
-			i := start + perLine + idx
-			if i < end {
-				s := cands[i]
-				if i == ed.compIndex {
-					lineBuf2.WriteString(colWrap(s, true))
-				} else {
-					lineBuf2.WriteString(s)
-				}
-				pad := colw - len(s)
-				for p := 0; p < pad; p++ {
-					lineBuf2.WriteString(" ")
-				}
-			} else {
-				for p := 0; p < colw; p++ {
-					lineBuf2.WriteString(" ")
-				}
-			}
-		}
-		b.WriteString("\x1b[2K\r")
-		b.WriteString(lineBuf2.String())
-		// clear rest of screen below second row
-		b.WriteString("\x1b[0J")
-		// now move down to original prompt line
-		b.WriteString("\x1b[1B")
-		// clear prompt line and write prompt + space + preview (first candidate)
-		b.WriteString("\x1b[2K\r")
-		// ensure prompt begins with $ if provided; use prompt as-is
-		showPrompt := prompt
-		firstPreview := ""
-		if len(cands) > 0 {
-			firstPreview = cands[0]
-		}
-		b.WriteString(showPrompt)
-		if firstPreview != "" {
-			b.WriteString(" ")
-			b.WriteString(firstPreview) // plain-text preview
-		}
-		// restore cursor
-		b.WriteString("\x1b8")
-		// write conservative block atomically
-		outStr := b.String()
-		// when deep debug requested, dump escaped buffer to stderr for byte-level analysis
-		if os.Getenv("KUSH_KEYDEBUG") == "3" {
-			// print hex-escaped bytes to stderr (not raw) for clean capture
-			esc := make([]byte, 0, len(outStr)*4)
-			for _, c := range []byte(outStr) {
-				esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
-			}
-			fmt.Fprintf(os.Stderr, "TABDEBUG conservative rawlen=%d escaped=%s\n", len(outStr), string(esc))
-		}
-		os.Stdout.WriteString(outStr)
-		// optional short pause for timing-sensitive terminals when deep debug
-		if os.Getenv("KUSH_KEYDEBUG") == "3" {
-			// 30ms pause
-			importTimeSleep30ms()
-		}
-		// debug buffer length
-		if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
-			fmt.Fprintf(os.Stderr, "TABDEBUG conservative write len=%d slots=%d perLine=%d start=%d end=%d compIndex=%d\n", b.Len(), totalSlots, perLine, start, end, ed.compIndex)
-		}
-		// redraw prompt explicitly
-		renderLine(prompt, buf, cursor)
-		ensureCursor(prompt, buf, cursor)
-		// mark completion-mode active so subsequent tabs reuse rows
-		ed.inCompletion = true
-		return
-	}
-
-	// get terminal width via ioctl(TIOCGWINSZ) -> cols, fallback to $COLUMNS then 80
+// getTermCols returns the terminal width, falling back to $COLUMNS then 80.
+func getTermCols() int {
 	cols := 80
 	var ws struct{ Row, Col, X, Y uint16 }
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
@@ -307,7 +121,14 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			cols = n
 		}
 	}
-	// compute max width of a candidate (limited)
+	return cols
+}
+
+// compLayout computes the column width, candidates per line, visible slots,
+// page start/end for the current candidate list and terminal width.
+func (ed *Editor) compLayout() (colw, perLine, visible, start, end int) {
+	cands := ed.compCandidates
+	cols := getTermCols()
 	maxw := 0
 	for _, c := range cands {
 		if w := len(c); w > maxw {
@@ -317,15 +138,13 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if maxw == 0 {
 		maxw = 1
 	}
-	// one candidate per column (no wrapping of choice text). column width = maxw + 2
-	colw := maxw + 2
-	perLine := cols / colw
+	colw = maxw + 2
+	perLine = cols / colw
 	if perLine < 1 {
 		perLine = 1
 	}
-	// total visible = perLine * 2
-	visible := perLine * 2
-	// normalize compPageStart to a multiple of visible and clamp
+	visible = perLine * 2
+	// normalise page start
 	if visible > 0 {
 		ed.compPageStart = (ed.compPageStart / visible) * visible
 	}
@@ -335,176 +154,108 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if ed.compPageStart >= len(cands) {
 		ed.compPageStart = 0
 	}
-	start := ed.compPageStart
-	end := start + visible
+	start = ed.compPageStart
+	end = start + visible
 	if end > len(cands) {
 		end = len(cands)
 	}
-	// verbose debug for geometry when requested
-	if os.Getenv("KUSH_KEYDEBUG") == "2" {
-		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
-	}
-	// Decide whether it's safe to print above the prompt. Use ws.Row (terminal
-	// height) as a heuristic: require enough rows so the full block can be placed
-	// above without hitting top-of-screen clamping. blockHeight is number of rows
-	// we need above the prompt (two rows for candidates).
-	blockHeight := 2
-	canAbove := false
-	if ws.Row >= uint16(blockHeight+2) {
-		canAbove = true
-	}
-	// build buffer depending on above/below choice
-	bufw := &bytes.Buffer{}
-	row1 := []int{}
-	row2 := []int{}
-	if canAbove {
-		// write above: save cursor, move up two lines, draw rows, preview prompt, restore
-		bufw.WriteString("\x1b7") // save cursor
-		bufw.WriteString("\x1b[2A")
-		// first row: build full line and write once
-		line1 := &bytes.Buffer{}
-		for i := start; i < start+perLine && i < end; i++ {
-			row1 = append(row1, i)
+	return
+}
+
+// buildCandidateRow builds a single row string of candidates from indices
+// [from, from+perLine) within [start, end), highlighting compIndex.
+func (ed *Editor) buildCandidateRow(from, perLine, end, colw int) string {
+	cands := ed.compCandidates
+	var row bytes.Buffer
+	for idx := 0; idx < perLine; idx++ {
+		i := from + idx
+		if i < end {
 			s := cands[i]
 			if i == ed.compIndex {
-				line1.WriteString(colWrap(s, true))
+				row.WriteString(colWrap(s, true))
 			} else {
-				line1.WriteString(s)
+				row.WriteString(s)
 			}
 			pad := colw - len(s)
 			for p := 0; p < pad; p++ {
-				line1.WriteString(" ")
+				row.WriteByte(' ')
 			}
-		}
-		bufw.WriteString("\x1b[2K\r")
-		bufw.WriteString(line1.String())
-		// second row
-		bufw.WriteString("\x1b[1B")
-		line2 := &bytes.Buffer{}
-		for i := start + perLine; i < start+2*perLine && i < end; i++ {
-			row2 = append(row2, i)
-			s := cands[i]
-			if i == ed.compIndex {
-				line2.WriteString(colWrap(s, true))
-			} else {
-				line2.WriteString(s)
-			}
-			pad := colw - len(s)
-			for p := 0; p < pad; p++ {
-				line2.WriteString(" ")
-			}
-		}
-		bufw.WriteString("\x1b[2K\r")
-		bufw.WriteString(line2.String())
-		bufw.WriteString("\x1b[0J")
-		bufw.WriteString("\x1b[1B")
-		bufw.WriteString("\x1b[2K\r")
-		showPrompt := prompt
-		firstPreview := ""
-		if len(cands) > 0 {
-			firstPreview = cands[ed.compIndex]
-		}
-		bufw.WriteString(showPrompt)
-		if firstPreview != "" {
-			bufw.WriteString(" ")
-			bufw.WriteString(firstPreview) // plain-text preview
-		}
-		bufw.WriteString("\x1b8")
-	} else {
-		// fallback: downward conservative render (original behaviour)
-		bufw.WriteString("\r\n")
-		// first down row: build a full line and write
-		firstDown := &bytes.Buffer{}
-		for idx := 0; idx < perLine; idx++ {
-			i := start + idx
-			if i < end {
-				s := cands[i]
-				if i == ed.compIndex {
-					firstDown.WriteString(colWrap(s, true))
-				} else {
-					firstDown.WriteString(s)
-				}
-				pad := colw - len(s)
-				for p := 0; p < pad; p++ {
-					firstDown.WriteString(" ")
-				}
-			} else {
-				for p := 0; p < colw; p++ {
-					firstDown.WriteString(" ")
-				}
-			}
-		}
-		bufw.WriteString("\x1b[2K\r")
-		bufw.WriteString(firstDown.String())
-		bufw.WriteString("\r\n")
-		secondDown := &bytes.Buffer{}
-		for idx := 0; idx < perLine; idx++ {
-			i := start + perLine + idx
-			if i < end {
-				s := cands[i]
-				if i == ed.compIndex {
-					secondDown.WriteString(colWrap(s, true))
-				} else {
-					secondDown.WriteString(s)
-				}
-				pad := colw - len(s)
-				for p := 0; p < pad; p++ {
-					secondDown.WriteString(" ")
-				}
-			} else {
-				for p := 0; p < colw; p++ {
-					secondDown.WriteString(" ")
-				}
-			}
-		}
-		bufw.WriteString("\x1b[2K\r")
-		bufw.WriteString(secondDown.String())
-		bufw.WriteString("\x1b[0J")
-		bufw.WriteString("\x1b[2K\r")
-		showPrompt := prompt
-		firstPreview := ""
-		if len(cands) > 0 {
-			firstPreview = cands[ed.compIndex]
-		}
-		bufw.WriteString(showPrompt)
-		if firstPreview != "" {
-			bufw.WriteString(" ")
-			bufw.WriteString(firstPreview) // plain-text preview
 		}
 	}
-	// write everything in one shot
-	outStr := bufw.String()
-	// when deep debug requested, dump escaped buffer to stderr for byte-level analysis
-	if os.Getenv("KUSH_KEYDEBUG") == "3" {
+	return row.String()
+}
+
+// resetCompletion clears all completion state and the inCompletion flag.
+func (ed *Editor) resetCompletion() {
+	ed.compCandidates = nil
+	ed.compIndex = 0
+	ed.compPageStart = 0
+	ed.inCompletion = false
+}
+
+// renderCandidates renders two rows of candidates and a prompt line below them.
+//
+// Layout (all downward from the current cursor line):
+//
+//	current line → candidate row 1
+//	next line    → candidate row 2
+//	next line    → prompt + preview of selected candidate
+//
+// When inCompletion is already set (subsequent Tab presses) the cursor is on
+// the prompt line (2 below candidates). We move up 2, redraw the rows, move
+// back down and redraw the prompt.
+func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
+	cands := ed.compCandidates
+	if len(cands) == 0 {
+		return
+	}
+
+	colw, perLine, _, start, end := ed.compLayout()
+	keyDebug := os.Getenv("KUSH_KEYDEBUG")
+
+	b := &bytes.Buffer{}
+
+	if ed.inCompletion {
+		// Cursor is on the prompt line, 2 rows below the candidate block.
+		// Move up 2 to redraw the candidate rows in place.
+		b.WriteString("\x1b[2A")
+	}
+	// else: cursor is on the original prompt line which becomes candidate row 1.
+
+	// Row 1: clear line, write candidates
+	b.WriteString("\r\x1b[2K")
+	b.WriteString(ed.buildCandidateRow(start, perLine, end, colw))
+
+	// Row 2: move down, clear line, write candidates
+	b.WriteString("\r\n\x1b[2K")
+	b.WriteString(ed.buildCandidateRow(start+perLine, perLine, end, colw))
+
+	// Prompt line: move down, clear line, write prompt + selected candidate preview
+	b.WriteString("\r\n\x1b[2K")
+	b.WriteString(prompt)
+	b.WriteString(string(buf))
+
+	outStr := b.String()
+
+	if keyDebug == "3" {
 		esc := make([]byte, 0, len(outStr)*4)
 		for _, c := range []byte(outStr) {
 			esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
 		}
 		fmt.Fprintf(os.Stderr, "TABDEBUG block rawlen=%d escaped=%s\n", len(outStr), string(esc))
 	}
-	os.Stdout.WriteString(outStr)
-	// optional short pause for timing-sensitive terminals when deep debug
-	if os.Getenv("KUSH_KEYDEBUG") == "3" {
-		importTimeSleep30ms()
-	}
-	// debug rows to stderr
-	if os.Getenv("KUSH_KEYDEBUG") == "2" {
-		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
-	}
-	// finally ensure cursor is positioned inside the prompt at len(prompt)+cursor
-	ensureCursor(prompt, buf, cursor)
-	os.Stdout.Sync()
-	// mark completion-mode active so subsequent tabs reuse rows
-	ed.inCompletion = true
-}
 
-// colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
-func importTimeSleep30ms() {
-	// small helper to avoid importing time in multiple spots; we call this only
-	// when deep debug is enabled to probe timing-sensitive races.
-	// Note: tiny sleep is optional and gated on KUSH_KEYDEBUG==3.
-	// (kept small to minimize test interference)
-	time.Sleep(30 * time.Millisecond)
+	os.Stdout.WriteString(outStr)
+
+	if keyDebug == "2" || keyDebug == "3" {
+		fmt.Fprintf(os.Stderr, "TABDEBUG write perLine=%d start=%d end=%d compIndex=%d inCompletion=%v\n",
+			perLine, start, end, ed.compIndex, ed.inCompletion)
+	}
+
+	// Position cursor on the prompt line at the correct column
+	ensureCursor(prompt, buf, cursor)
+
+	ed.inCompletion = true
 }
 
 func colWrap(s string, useInverse bool) string {
@@ -554,6 +305,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 		if r == 3 {
 			buf = []rune{}
 			cursor = 0
+			ed.resetCompletion()
 			renderLine(prompt, buf, cursor)
 			continue
 		}
@@ -620,44 +372,13 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						} else {
 							ed.compIndex = len(ed.compCandidates) - 1
 						}
-						// page so index is visible
-						// compute perLine same way as renderCandidates
-						cols := 80
-						var ws struct{ Row, Col, X, Y uint16 }
-						_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-						if errno == 0 && ws.Col > 0 {
-							cols = int(ws.Col)
-						} else if v := os.Getenv("COLUMNS"); v != "" {
-							var n int
-							if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
-								cols = n
-							}
-						}
-						maxw := 0
-						for _, c := range ed.compCandidates {
-							if l := len(c); l > maxw {
-								maxw = l
-							}
-						}
-						if maxw == 0 {
-							maxw = 1
-						}
-						colw := maxw + 2
-						perLine := cols / colw
-						if perLine < 1 {
-							perLine = 1
-						}
-						visible := perLine * 2
-						// adjust page start so compIndex lies within [pageStart, pageStart+visible)
+						_, _, visible, _, _ := ed.compLayout()
 						if ed.compIndex < ed.compPageStart {
 							ed.compPageStart = ed.compIndex
 						} else if ed.compIndex >= ed.compPageStart+visible {
 							ed.compPageStart = ed.compIndex - (ed.compIndex % visible)
 						}
-						// redraw candidates
 						ed.renderCandidates(prompt, buf, cursor)
-						renderLine(prompt, buf, cursor)
-						ensureCursor(prompt, buf, cursor)
 					}
 					continue
 				}
@@ -852,34 +573,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			// If we have an existing candidate list and same start, cycle
 			if ed.compCandidates != nil && ed.compStart == start && len(ed.compCandidates) > 0 {
 				ed.compIndex = (ed.compIndex + 1) % len(ed.compCandidates)
-				// ensure page contains index
-				// compute perLine similar to renderCandidates
-				cols := 80
-				var ws struct{ Row, Col, X, Y uint16 }
-				_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
-				if errno == 0 && ws.Col > 0 {
-					cols = int(ws.Col)
-				} else if v := os.Getenv("COLUMNS"); v != "" {
-					var n int
-					if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
-						cols = n
-					}
-				}
-				maxw := 0
-				for _, c := range ed.compCandidates {
-					if l := len(c); l > maxw {
-						maxw = l
-					}
-				}
-				if maxw == 0 {
-					maxw = 1
-				}
-				colw := maxw + 2
-				perLine := cols / colw
-				if perLine < 1 {
-					perLine = 1
-				}
-				visible := perLine * 2
+				_, _, visible, _, _ := ed.compLayout()
 				if ed.compIndex < ed.compPageStart {
 					ed.compPageStart = ed.compIndex
 				} else if ed.compIndex >= ed.compPageStart+visible {
@@ -895,9 +589,6 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				}
 				buf = newLine
 				cursor = start + len(newBuf)
-				renderLine(prompt, buf, cursor)
-				// deterministic reposition and debug
-				ensureCursor(prompt, buf, cursor)
 				// redraw candidate page below
 				ed.renderCandidates(prompt, buf, cursor)
 				continue
@@ -921,19 +612,23 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 				ensureCursor(prompt, buf, cursor)
 				continue
 			}
-			// multiple candidates: show two-line page and leave buffer unchanged
+			// multiple candidates: insert first candidate into buffer and show page
+			cand := cands[0]
+			newBuf := []rune(cand)
+			newLine := append([]rune(string(buf[:start])), newBuf...)
+			if cursor < len(buf) {
+				newLine = append(newLine, buf[cursor:]...)
+			}
+			buf = newLine
+			cursor = start + len(newBuf)
 			ed.renderCandidates(prompt, buf, cursor)
-			renderLine(prompt, buf, cursor)
-			ensureCursor(prompt, buf, cursor)
 			continue
 		}
 
 		// printable runes (>= space)
 		if r >= 32 {
 			// any normal keypress resets completion state
-			ed.compCandidates = nil
-			ed.compIndex = 0
-			ed.compPageStart = 0
+			ed.resetCompletion()
 			if cursor == len(buf) {
 				buf = append(buf, r)
 			} else {

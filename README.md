@@ -1,21 +1,23 @@
 # kush — a tiny custom shell
 
 Kush is a minimal terminal shell written in Go. It provides a custom
-single-line editor (no readline or go-prompt dependency), command aliases,
-persistent history, and a PTY-backed command runner so interactive programs
-behave correctly.
+single-line editor (no readline or go-prompt dependency), tab completion,
+command aliases, persistent history, and a PTY-backed command runner so
+interactive programs behave correctly.
 
 ## Features
 
 - **Line editor** — single-line editing with cursor movement, history
   navigation, and word-level operations. No external TUI libraries.
+- **Tab completion** — context-aware completion for commands (from `$PATH`)
+  and file paths, with a two-row candidate display and Tab/Shift+Tab cycling.
 - **PTY runner** — commands run inside a pseudoterminal (`openpty` on macOS,
   `posix_openpt` on Linux) with automatic fallback to plain `exec` on
   unsupported platforms.
 - **Aliases** — loaded from `~/.kush_aliases` (or `$KUSH_ALIASES`), with
   two-pass chained expansion and live reload via `alias -r` or SIGHUP.
 - **Builtins** — `cd`, `history`, `alias`, `unalias`, `reload`, `which`,
-  `checksum` (stub).
+  `help`, `checksum` (stub).
 - **Config** — optional `~/.kush_config` for key=value settings like
   `PATH_FIRST`.
 
@@ -30,20 +32,22 @@ Requires Go 1.25+ and cgo on macOS (for `openpty`).
 
 ## Key bindings
 
-| Key               | Action                       |
-|--------------------|------------------------------|
-| Left / Right       | Move cursor                  |
-| Up / Down          | Navigate history             |
-| Home / End         | Jump to start / end of line  |
-| Alt+Left / Alt+Right | Move by word              |
-| Backspace          | Delete character left        |
-| Alt+Backspace      | Delete word left             |
-| Delete             | Delete word right            |
-| Ctrl+W             | Kill word left               |
-| Ctrl+U             | Kill to start of line        |
-| Ctrl+K             | Kill to end of line          |
-| Ctrl+C             | Clear current line           |
-| Ctrl+D             | Exit (EOF)                   |
+| Key                   | Action                       |
+|-----------------------|------------------------------|
+| Tab                   | Complete / cycle forward      |
+| Shift+Tab             | Cycle backward                |
+| Left / Right          | Move cursor                  |
+| Up / Down             | Navigate history             |
+| Home / End            | Jump to start / end of line  |
+| Alt+Left / Alt+Right  | Move by word                 |
+| Backspace             | Delete character left        |
+| Alt+Backspace         | Delete word left             |
+| Delete                | Delete word right            |
+| Ctrl+W                | Kill word left               |
+| Ctrl+U                | Kill to start of line        |
+| Ctrl+K                | Kill to end of line          |
+| Ctrl+C                | Clear current line           |
+| Ctrl+D                | Exit (EOF)                   |
 
 ## Terminal configuration
 
@@ -68,7 +72,11 @@ Set `KUSH_DEBUG` to control diagnostic output on stderr:
 - `1` — verbose; alias loading, reload events, and runner diagnostics.
 - `2` — trace; detailed PTY lifecycle, termios state, and goroutine events.
 
-Key debug mode: run with `KUSH_KEYDEBUG=1` to log raw key codes to stderr.
+Set `KUSH_KEYDEBUG` for key input diagnostics:
+
+- `1` — log raw key codes to stderr.
+- `2` — key codes plus cursor position debug.
+- `3` — all of the above.
 
 ## Aliases
 
@@ -97,13 +105,17 @@ internal/
     lineeditor.go                Editor implementation
     term_darwin.go               macOS termios (raw mode)
     term_linux.go                Linux termios
+  completion/completion.go       Tab completion (commands + paths)
   runner/                        Command execution
     pty_runner.go                PTY runner + plain-exec fallback
+    run_shell.go                 Shell-mode execution
     pty_darwin.go                openpty via cgo (macOS)
     pty_linux.go                 posix_openpt (Linux)
     pty_unsupported.go           Stub for other platforms
   aliases/aliases.go             Alias loading, expansion, persistence
-  builtins/builtins.go           Shell builtins
+  builtins/
+    builtins.go                  Shell builtins
+    help.go                      Help text
   config/config.go               Config file loader
   log/log.go                     Levelled logging
 ```
