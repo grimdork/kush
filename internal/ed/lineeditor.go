@@ -29,6 +29,8 @@ type Editor struct {
 	compCandidates []string
 	compIndex      int
 	compPageStart  int
+	// disable DECSTBM usage for this session after observed failures
+	disableDECSTBM bool
 }
 
 // Close is a no-op for the simple ANSI editor (kept for API compatibility).
@@ -48,7 +50,11 @@ func New() (*Editor, error) {
 			}
 		}
 	}
-	return &Editor{history: history, histPath: hist}, nil
+	ed := &Editor{history: history, histPath: hist}
+	if os.Getenv("KUSH_DISABLE_DECSTBM") == "1" {
+		ed.disableDECSTBM = true
+	}
+	return ed, nil
 }
 
 // appendHistory saves a new entry to the history in-memory and on disk.
@@ -87,6 +93,78 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if len(cands) == 0 {
 		return
 	}
+	// If session-level disable is set, fall back to a conservative simple render
+	// that avoids any scroll-region or DECSC/DECRC manipulation which have
+	// exhibited terminal-driver races on some environments.
+	if ed.disableDECSTBM {
+		// simple conservative render: write a newline, two compact rows, then redraw prompt
+		cols := 80
+		var ws struct{ Row, Col, X, Y uint16 }
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdout), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+		if errno == 0 && ws.Col > 0 {
+			cols = int(ws.Col)
+		} else if v := os.Getenv("COLUMNS"); v != "" {
+			var n int
+			if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+				cols = n
+			}
+		}
+		maxw := 0
+		for _, c := range cands {
+			if w := len(c); w > maxw {
+				maxw = w
+			}
+		}
+		if maxw == 0 {
+			maxw = 1
+		}
+		colw := maxw + 2
+		perLine := cols / colw
+		if perLine < 1 {
+			perLine = 1
+		}
+		start := ed.compPageStart
+		if start < 0 {
+			start = 0
+		}
+		end := start + perLine*2
+		if end > len(cands) {
+			end = len(cands)
+		}
+		// build conservative text
+		b := &bytes.Buffer{}
+		b.WriteString("\r\n")
+		for i := start; i < start+perLine && i < end; i++ {
+			s := cands[i]
+			if i == ed.compIndex {
+				b.WriteString(colWrap(s, true))
+			} else {
+				b.WriteString(s)
+			}
+			pad := colw - len(s)
+			for p := 0; p < pad; p++ {
+				b.WriteString(" ")
+			}
+		}
+		b.WriteString("\r\n")
+		for i := start + perLine; i < start+2*perLine && i < end; i++ {
+			s := cands[i]
+			if i == ed.compIndex {
+				b.WriteString(colWrap(s, true))
+			} else {
+				b.WriteString(s)
+			}
+			pad := colw - len(s)
+			for p := 0; p < pad; p++ {
+				b.WriteString(" ")
+			}
+		}
+		// write conservative block and redraw prompt
+		os.Stdout.WriteString(b.String())
+		renderLine(prompt, buf, cursor)
+		return
+	}
+
 	// get terminal width via ioctl(TIOCGWINSZ) -> cols, fallback to $COLUMNS then 80
 	cols := 80
 	var ws struct{ Row, Col, X, Y uint16 }
@@ -323,7 +401,6 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 							ed.compIndex = len(ed.compCandidates) - 1
 						}
 						// page so index is visible
-						perLine := 1
 						// compute perLine same way as renderCandidates
 						cols := 80
 						var ws struct{ Row, Col, X, Y uint16 }
