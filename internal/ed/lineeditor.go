@@ -423,8 +423,9 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 							maxw = 1
 						}
 						colw := maxw + 2
-						if c := cols / colw; c >= 1 {
-							perLine = c
+						perLine := cols / colw
+						if perLine < 1 {
+							perLine = 1
 						}
 						visible := perLine * 2
 						// adjust page start so compIndex lies within [pageStart, pageStart+visible)
