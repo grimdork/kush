@@ -184,7 +184,17 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		// ensure rest of screen below is cleared to avoid residual junk
 		b.WriteString("\x1b[0J")
 		// write conservative block atomically
-		os.Stdout.WriteString(b.String())
+		outStr := b.String()
+		// when deep debug requested, dump escaped buffer to stderr for byte-level analysis
+		if os.Getenv("KUSH_KEYDEBUG") == "3" {
+			// print hex-escaped bytes to stderr (not raw) for clean capture
+			esc := make([]byte, 0, len(outStr)*4)
+			for _, c := range []byte(outStr) {
+				esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
+			}
+			fmt.Fprintf(os.Stderr, "TABDEBUG conservative rawlen=%d escaped=%s\n", len(outStr), string(esc))
+		}
+		os.Stdout.WriteString(outStr)
 		// debug buffer length
 		if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
 			fmt.Fprintf(os.Stderr, "TABDEBUG conservative write len=%d slots=%d perLine=%d start=%d end=%d compIndex=%d\n", b.Len(), totalSlots, perLine, start, end, ed.compIndex)
