@@ -127,12 +127,24 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		if len(cands) > 0 {
 			firstPreview = cands[ed.compIndex]
 		}
-		os.Stdout.WriteString("\r\x1b[K")
-		os.Stdout.WriteString(showPrompt)
+		// build preview string so we can optionally dump exact bytes under deep debug
+		previewBuf := &bytes.Buffer{}
+		previewBuf.WriteString("\r\x1b[K")
+		previewBuf.WriteString(showPrompt)
 		if firstPreview != "" {
-			os.Stdout.WriteString(" ")
-			os.Stdout.WriteString(firstPreview)
+			previewBuf.WriteString(" ")
+			previewBuf.WriteString(firstPreview)
 		}
+		previewStr := previewBuf.String()
+		if os.Getenv("KUSH_KEYDEBUG") == "3" {
+			// escape bytes for stderr-safe capture
+			esc := make([]byte, 0, len(previewStr)*4)
+			for _, c := range []byte(previewStr) {
+				esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
+			}
+			fmt.Fprintf(os.Stderr, "TABDEBUG preview rawlen=%d escaped=%s\n", len(previewStr), string(esc))
+		}
+		os.Stdout.WriteString(previewStr)
 		renderLine(prompt, buf, cursor)
 		ensureCursor(prompt, buf, cursor)
 		return
@@ -461,7 +473,16 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		}
 	}
 	// write everything in one shot
-	os.Stdout.WriteString(bufw.String())
+	outStr := bufw.String()
+	// when deep debug requested, dump escaped buffer to stderr for byte-level analysis
+	if os.Getenv("KUSH_KEYDEBUG") == "3" {
+		esc := make([]byte, 0, len(outStr)*4)
+		for _, c := range []byte(outStr) {
+			esc = append(esc, []byte(fmt.Sprintf("\\x%02x", c))...)
+		}
+		fmt.Fprintf(os.Stderr, "TABDEBUG block rawlen=%d escaped=%s\n", len(outStr), string(esc))
+	}
+	os.Stdout.WriteString(outStr)
 	// optional short pause for timing-sensitive terminals when deep debug
 	if os.Getenv("KUSH_KEYDEBUG") == "3" {
 		importTimeSleep30ms()
