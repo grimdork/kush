@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/grimdork/kush/internal/completion"
@@ -32,6 +33,9 @@ type Editor struct {
 	compPageStart  int
 	// disable DECSTBM usage for this session after observed failures
 	disableDECSTBM bool
+	// inCompletion indicates we have active candidate rows displayed and
+	// subsequent Tab presses should reuse them rather than reflow/print above.
+	inCompletion bool
 }
 
 // Close is a no-op for the simple ANSI editor (kept for API compatibility).
@@ -112,6 +116,25 @@ func renderLine(prompt string, buf []rune, cursor int) {
 func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	cands := ed.compCandidates
 	if len(cands) == 0 {
+		return
+	}
+	// If we're already in completion mode, reuse the displayed candidate rows:
+	// only update the prompt preview/highlight without reflowing the block.
+	if ed.inCompletion {
+		// redraw prompt preview (plain-text) and position cursor
+		showPrompt := prompt
+		firstPreview := ""
+		if len(cands) > 0 {
+			firstPreview = cands[ed.compIndex]
+		}
+		os.Stdout.WriteString("\r\x1b[K")
+		os.Stdout.WriteString(showPrompt)
+		if firstPreview != "" {
+			os.Stdout.WriteString(" ")
+			os.Stdout.WriteString(firstPreview)
+		}
+		renderLine(prompt, buf, cursor)
+		ensureCursor(prompt, buf, cursor)
 		return
 	}
 	// If session-level disable is set, fall back to a conservative simple render
@@ -243,6 +266,11 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 			fmt.Fprintf(os.Stderr, "TABDEBUG conservative rawlen=%d escaped=%s\n", len(outStr), string(esc))
 		}
 		os.Stdout.WriteString(outStr)
+		// optional short pause for timing-sensitive terminals when deep debug
+		if os.Getenv("KUSH_KEYDEBUG") == "3" {
+			// 30ms pause
+			importTimeSleep30ms()
+		}
 		// debug buffer length
 		if os.Getenv("KUSH_KEYDEBUG") == "2" || os.Getenv("KUSH_KEYDEBUG") == "3" {
 			fmt.Fprintf(os.Stderr, "TABDEBUG conservative write len=%d slots=%d perLine=%d start=%d end=%d compIndex=%d\n", b.Len(), totalSlots, perLine, start, end, ed.compIndex)
@@ -250,6 +278,8 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		// redraw prompt explicitly
 		renderLine(prompt, buf, cursor)
 		ensureCursor(prompt, buf, cursor)
+		// mark completion-mode active so subsequent tabs reuse rows
+		ed.inCompletion = true
 		return
 	}
 
@@ -432,6 +462,10 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	}
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
+	// optional short pause for timing-sensitive terminals when deep debug
+	if os.Getenv("KUSH_KEYDEBUG") == "3" {
+		importTimeSleep30ms()
+	}
 	// debug rows to stderr
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG rows row1=%v row2=%v\n", row1, row2)
@@ -439,10 +473,21 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	// finally ensure cursor is positioned inside the prompt at len(prompt)+cursor
 	ensureCursor(prompt, buf, cursor)
 	os.Stdout.Sync()
+	// mark completion-mode active so subsequent tabs reuse rows
+	ed.inCompletion = true
 }
 
 // colWrap wraps s in the configured tab colour using ANSI; if useInverse true, prefer colour then inverse fallback.
+func importTimeSleep30ms() {
+	// small helper to avoid importing time in multiple spots; we call this only
+	// when deep debug is enabled to probe timing-sensitive races.
+	// Note: tiny sleep is optional and gated on KUSH_KEYDEBUG==3.
+	// (kept small to minimize test interference)
+	time.Sleep(30 * time.Millisecond)
+}
+
 func colWrap(s string, useInverse bool) string {
+
 	col := strings.ToLower(os.Getenv("KUSH_TAB_COLOUR"))
 	// map simple names to codes
 	m := map[string]string{"black": "30", "red": "31", "green": "32", "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37"}
