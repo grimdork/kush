@@ -135,54 +135,81 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 		}
 		// build conservative text: explicitly clear and pad lines so every redraw is full
 		b := &bytes.Buffer{}
-		b.WriteString("\r\n")
-		// first row: ensure we iterate exactly perLine slots
-		for idx := 0; idx < perLine; idx++ {
-			i := start + idx
-			// clear line start
-			b.WriteString("\x1b[2K\r")
-			if i < end {
-				s := cands[i]
-				if i == ed.compIndex {
-					b.WriteString(colWrap(s, true))
+		// We want candidates printed ABOVE the current prompt. Save cursor, move up two
+		// lines, write the two candidate rows, then move back to prompt line and
+		// print a refreshed prompt with the first candidate shown after the prompt
+		// (visual-only; buffer is unchanged).
+		b.WriteString("\x1b7") // save
+		// move up two lines (if at top this will clamp)
+		b.WriteString("\x1b[2A")
+		// first candidate row: build full line then write once
+		for row := 0; row < 1; row++ {
+			lineBuf := &bytes.Buffer{}
+			for idx := 0; idx < perLine; idx++ {
+				i := start + idx
+				if i < end {
+					s := cands[i]
+					if i == ed.compIndex {
+						lineBuf.WriteString(colWrap(s, true))
+					} else {
+						lineBuf.WriteString(s)
+					}
+					pad := colw - len(s)
+					for p := 0; p < pad; p++ {
+						lineBuf.WriteString(" ")
+					}
 				} else {
-					b.WriteString(s)
-				}
-				pad := colw - len(s)
-				for p := 0; p < pad; p++ {
-					b.WriteString(" ")
-				}
-			} else {
-				// pad empty slot
-				for p := 0; p < colw; p++ {
-					b.WriteString(" ")
+					for p := 0; p < colw; p++ {
+						lineBuf.WriteString(" ")
+					}
 				}
 			}
+			b.WriteString("\x1b[2K\r")
+			b.WriteString(lineBuf.String())
 		}
-		b.WriteString("\r\n")
-		// second row
+		// move to next line and write second row similarly
+		b.WriteString("\x1b[1B")
+		lineBuf2 := &bytes.Buffer{}
 		for idx := 0; idx < perLine; idx++ {
 			i := start + perLine + idx
-			b.WriteString("\x1b[2K\r")
 			if i < end {
 				s := cands[i]
 				if i == ed.compIndex {
-					b.WriteString(colWrap(s, true))
+					lineBuf2.WriteString(colWrap(s, true))
 				} else {
-					b.WriteString(s)
+					lineBuf2.WriteString(s)
 				}
 				pad := colw - len(s)
 				for p := 0; p < pad; p++ {
-					b.WriteString(" ")
+					lineBuf2.WriteString(" ")
 				}
 			} else {
 				for p := 0; p < colw; p++ {
-					b.WriteString(" ")
+					lineBuf2.WriteString(" ")
 				}
 			}
 		}
-		// ensure rest of screen below is cleared to avoid residual junk
+		b.WriteString("\x1b[2K\r")
+		b.WriteString(lineBuf2.String())
+		// clear rest of screen below second row
 		b.WriteString("\x1b[0J")
+		// now move down to original prompt line
+		b.WriteString("\x1b[1B")
+		// clear prompt line and write prompt + space + preview (first candidate)
+		b.WriteString("\x1b[2K\r")
+		// ensure prompt begins with $ if provided; use prompt as-is
+		showPrompt := prompt
+		firstPreview := ""
+		if len(cands) > 0 {
+			firstPreview = cands[0]
+		}
+		b.WriteString(showPrompt)
+		if firstPreview != "" {
+			b.WriteString(" ")
+			b.WriteString(firstPreview)
+		}
+		// restore cursor
+		b.WriteString("\x1b8")
 		// write conservative block atomically
 		outStr := b.String()
 		// when deep debug requested, dump escaped buffer to stderr for byte-level analysis
@@ -253,63 +280,133 @@ func (ed *Editor) renderCandidates(prompt string, buf []rune, cursor int) {
 	if os.Getenv("KUSH_KEYDEBUG") == "2" {
 		fmt.Fprintf(os.Stderr, "TABDEBUG cols=%d ws.Col=%d maxw=%d colw=%d perLine=%d visible=%d compPageStart=%d start=%d end=%d compIndex=%d\n", cols, ws.Col, maxw, colw, perLine, visible, ed.compPageStart, start, end, ed.compIndex)
 	}
-	// save cursor state (DECSC), position cursor to end of prompt: carriage return then move right promptLen columns
-	// Use ESC7/ESC8 (DECSC/DECRC) for broader terminal compatibility in some environments.
-	os.Stdout.WriteString("\x1b7")
-	promptLen := len(prompt)
-	os.Stdout.WriteString("\r")
-	if promptLen > 0 {
-		os.Stdout.WriteString("\x1b[" + fmt.Sprintf("%d", promptLen) + "C")
+	// Decide whether it's safe to print above the prompt. Use ws.Row (terminal
+	// height) as a heuristic: if there are at least 3 rows, we assume room above
+	// to write two rows without hitting top-of-screen clamping. Otherwise fall
+	// back to the downward conservative render (write after the prompt).
+	canAbove := false
+	if ws.Row >= 3 {
+		canAbove = true
 	}
-	// move down one line to candidate area, then set to column 1
-	os.Stdout.WriteString("\x1b[1B\x1b[1G")
-	// clear from cursor to end of screen to remove remnants below prompt
-	os.Stdout.WriteString("\x1b[0J")
-	// clear both lines we'll overwrite and draw first row
-	os.Stdout.WriteString("\x1b[2K\r")
-	// build both candidate rows and the prompt line into a single buffer to write atomically
+	// build buffer depending on above/below choice
 	bufw := &bytes.Buffer{}
-	// first row
 	row1 := []int{}
-	for i := start; i < start+perLine && i < end; i++ {
-		row1 = append(row1, i)
-		s := cands[i]
-		if i == ed.compIndex {
-			bufw.WriteString(colWrap(s, true))
-		} else {
-			bufw.WriteString(s)
-		}
-		pad := colw - len(s)
-		for p := 0; p < pad; p++ {
-			bufw.WriteString(" ")
-		}
-	}
-	// move to second row
-	bufw.WriteString("\x1b[1B\x1b[2K\r")
-	// second row
 	row2 := []int{}
-	for i := start + perLine; i < start+2*perLine && i < end; i++ {
-		row2 = append(row2, i)
-		s := cands[i]
-		if i == ed.compIndex {
-			bufw.WriteString(colWrap(s, true))
-		} else {
-			bufw.WriteString(s)
+	if canAbove {
+		// write above: save cursor, move up two lines, draw rows, preview prompt, restore
+		bufw.WriteString("\x1b7") // save cursor
+		bufw.WriteString("\x1b[2A")
+		// first row: build full line and write once
+		line1 := &bytes.Buffer{}
+		for i := start; i < start+perLine && i < end; i++ {
+			row1 = append(row1, i)
+			s := cands[i]
+			if i == ed.compIndex {
+				line1.WriteString(colWrap(s, true))
+			} else {
+				line1.WriteString(s)
+			}
+			pad := colw - len(s)
+			for p := 0; p < pad; p++ {
+				line1.WriteString(" ")
+			}
 		}
-		pad := colw - len(s)
-		for p := 0; p < pad; p++ {
+		bufw.WriteString("\x1b[2K\r")
+		bufw.WriteString(line1.String())
+		// second row
+		bufw.WriteString("\x1b[1B")
+		line2 := &bytes.Buffer{}
+		for i := start + perLine; i < start+2*perLine && i < end; i++ {
+			row2 = append(row2, i)
+			s := cands[i]
+			if i == ed.compIndex {
+				line2.WriteString(colWrap(s, true))
+			} else {
+				line2.WriteString(s)
+			}
+			pad := colw - len(s)
+			for p := 0; p < pad; p++ {
+				line2.WriteString(" ")
+			}
+		}
+		bufw.WriteString("\x1b[2K\r")
+		bufw.WriteString(line2.String())
+		bufw.WriteString("\x1b[0J")
+		bufw.WriteString("\x1b[1B")
+		bufw.WriteString("\x1b[2K\r")
+		showPrompt := prompt
+		firstPreview := ""
+		if len(cands) > 0 {
+			firstPreview = cands[ed.compIndex]
+		}
+		bufw.WriteString(showPrompt)
+		if firstPreview != "" {
 			bufw.WriteString(" ")
+			bufw.WriteString(firstPreview)
+		}
+		bufw.WriteString("\x1b8")
+	} else {
+		// fallback: downward conservative render (original behaviour)
+		bufw.WriteString("\r\n")
+		// first down row: build a full line and write
+		firstDown := &bytes.Buffer{}
+		for idx := 0; idx < perLine; idx++ {
+			i := start + idx
+			if i < end {
+				s := cands[i]
+				if i == ed.compIndex {
+					firstDown.WriteString(colWrap(s, true))
+				} else {
+					firstDown.WriteString(s)
+				}
+				pad := colw - len(s)
+				for p := 0; p < pad; p++ {
+					firstDown.WriteString(" ")
+				}
+			} else {
+				for p := 0; p < colw; p++ {
+					firstDown.WriteString(" ")
+				}
+			}
+		}
+		bufw.WriteString("\x1b[2K\r")
+		bufw.WriteString(firstDown.String())
+		bufw.WriteString("\r\n")
+		secondDown := &bytes.Buffer{}
+		for idx := 0; idx < perLine; idx++ {
+			i := start + perLine + idx
+			if i < end {
+				s := cands[i]
+				if i == ed.compIndex {
+					secondDown.WriteString(colWrap(s, true))
+				} else {
+					secondDown.WriteString(s)
+				}
+				pad := colw - len(s)
+				for p := 0; p < pad; p++ {
+					secondDown.WriteString(" ")
+				}
+			} else {
+				for p := 0; p < colw; p++ {
+					secondDown.WriteString(" ")
+				}
+			}
+		}
+		bufw.WriteString("\x1b[2K\r")
+		bufw.WriteString(secondDown.String())
+		bufw.WriteString("\x1b[0J")
+		bufw.WriteString("\x1b[2K\r")
+		showPrompt := prompt
+		firstPreview := ""
+		if len(cands) > 0 {
+			firstPreview = cands[ed.compIndex]
+		}
+		bufw.WriteString(showPrompt)
+		if firstPreview != "" {
+			bufw.WriteString(" ")
+			bufw.WriteString(firstPreview)
 		}
 	}
-	// draw page indicator at far right if more pages exist
-	if end < len(cands) {
-		bufw.WriteString("\r\x1b[" + fmt.Sprintf("%d", cols-3) + "C")
-		bufw.WriteString("»")
-	}
-	// finally move down one line and render prompt+buffer
-	bufw.WriteString("\x1b[1B\r\x1b[K")
-	bufw.WriteString(prompt)
-	bufw.WriteString(string(buf))
 	// write everything in one shot
 	os.Stdout.WriteString(bufw.String())
 	// debug rows to stderr
