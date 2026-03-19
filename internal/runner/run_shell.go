@@ -34,8 +34,8 @@ func RunShell(line string) error {
 		shell = "sh"
 	}
 
-	cmd := exec.Command(shell, "-lc", line)
-	log.Debugf("pty exec: %s -lc %q", shell, line)
+	cmd := exec.Command(shell, "-c", line)
+	log.Debugf("pty exec: %s -c %q", shell, line)
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
@@ -180,7 +180,7 @@ func runPlain(line string) error {
 		shell = "sh"
 	}
 
-	cmd := exec.Command(shell, "-lc", line)
+	cmd := exec.Command(shell, "-c", line)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

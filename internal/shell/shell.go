@@ -2,7 +2,6 @@ package shell
 
 import (
 	"fmt"
-
 	"os"
 	"os/signal"
 	"strconv"
@@ -131,13 +130,7 @@ func Run() error {
 			continue
 		}
 
-		if bt.Handle(line) {
-			continue
-		}
-
-		// Expand aliases before execution. A two-pass scheme allows
-		// chained aliases (e.g. la → ls -la, ls → ls --color=yes) while
-		// avoiding infinite loops or duplicate flags.
+		// Expand aliases before dispatch.
 		if al == nil {
 			al, _ = aliases.Load()
 		}
@@ -158,8 +151,20 @@ func Run() error {
 			}
 		}
 
-		// Close the editor so the child gets a normal terminal, then
-		// recreate it for the next prompt.
+		// Check if the line has pipeline/redirect operators and involves builtins.
+		if hasPipelineOps(line) {
+			if handled := executePipeline(parsePipeline(line), bt); handled {
+				continue
+			}
+		}
+
+		// Simple builtin (no pipes or redirects).
+		if bt.Handle(line) {
+			continue
+		}
+
+		// External command — close the editor so the child gets a
+		// normal terminal, then recreate it for the next prompt.
 		le.Close()
 		if err := runner.RunShell(line); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)

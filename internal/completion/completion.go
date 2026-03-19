@@ -40,8 +40,12 @@ func Complete(line string, pos int) (int, []string) {
 		cmd = fields[0]
 	}
 	candidates := []string{}
+	// If the prefix looks like a path, do file completion regardless of position.
+	isPath := strings.HasPrefix(prefix, "~") || strings.HasPrefix(prefix, "/") ||
+		strings.HasPrefix(prefix, "./") || strings.HasPrefix(prefix, "../")
+
 	// If at first token (no previous fields), suggest builtins, aliases, PATH
-	if start == 0 {
+	if start == 0 && !isPath {
 		if builtinProvider != nil {
 			for _, b := range builtinProvider() {
 				if strings.HasPrefix(b, prefix) {
@@ -83,20 +87,7 @@ func Complete(line string, pos int) (int, []string) {
 	} else {
 		// Not first token: file completion, with special-casing for `cd` and `which` and `help`
 		if cmd == "cd" {
-			// list directories matching prefix
-			prefixExpanded := expandPath(prefix)
-			dir := filepath.Dir(prefixExpanded)
-			if dir == "" {
-				dir = "."
-			}
-			entries, err := os.ReadDir(dir)
-			if err == nil {
-				for _, e := range entries {
-					if e.IsDir() && strings.HasPrefix(e.Name(), filepath.Base(prefixExpanded)) {
-						candidates = append(candidates, filepath.Join(dir, e.Name())+string(os.PathSeparator))
-					}
-				}
-			}
+			candidates = completeFilesystem(prefix, true)
 			return start, candidates
 		}
 		if cmd == "which" {
@@ -144,24 +135,7 @@ func Complete(line string, pos int) (int, []string) {
 			return start, candidates
 		}
 		// default: filesystem entries
-		prefixExpanded := expandPath(prefix)
-		dir := filepath.Dir(prefixExpanded)
-		if dir == "" {
-			dir = "."
-		}
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, e := range entries {
-				name := e.Name()
-				if strings.HasPrefix(name, filepath.Base(prefixExpanded)) {
-					if e.IsDir() {
-						candidates = append(candidates, filepath.Join(dir, name)+string(os.PathSeparator))
-					} else {
-						candidates = append(candidates, filepath.Join(dir, name))
-					}
-				}
-			}
-		}
+		candidates = completeFilesystem(prefix, false)
 	}
 
 	// dedupe and sort
@@ -180,7 +154,63 @@ func Complete(line string, pos int) (int, []string) {
 func expandPath(p string) string {
 	if strings.HasPrefix(p, "~") {
 		h := os.Getenv("HOME")
-		return filepath.Join(h, strings.TrimPrefix(p, "~"))
+		rest := strings.TrimPrefix(p, "~")
+		if rest == "" || rest == "/" {
+			return h + "/"
+		}
+		return h + rest
 	}
 	return p
+}
+
+// completeFilesystem handles path-aware file/directory completion.
+// It preserves the user's original prefix form (~, ./, ../, /) in candidates.
+func completeFilesystem(prefix string, dirsOnly bool) []string {
+	expanded := expandPath(prefix)
+
+	var dir, base string
+	if strings.HasSuffix(expanded, "/") {
+		// User typed a complete directory — list its contents.
+		dir = expanded
+		base = ""
+	} else {
+		dir = filepath.Dir(expanded)
+		base = filepath.Base(expanded)
+	}
+	if dir == "" {
+		dir = "."
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	// Figure out the prefix to prepend so candidates match the user's
+	// original typing (~/foo, ./bar, /etc).
+	var userDir string
+	if strings.HasSuffix(prefix, "/") {
+		userDir = prefix
+	} else if strings.Contains(prefix, "/") {
+		userDir = prefix[:strings.LastIndex(prefix, "/")+1]
+	} else {
+		userDir = ""
+	}
+
+	var candidates []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, base) {
+			continue
+		}
+		if dirsOnly && !e.IsDir() {
+			continue
+		}
+		if e.IsDir() {
+			candidates = append(candidates, userDir+name+"/")
+		} else {
+			candidates = append(candidates, userDir+name)
+		}
+	}
+	return candidates
 }
