@@ -1,0 +1,81 @@
+version: 2
+project_name: kush
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: client
+    dir: .
+    main: .
+    binary: kush
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.date={{.CommitDate}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+release:
+  prerelease: true
+
+archives:
+  - wrap_in_directory: true
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# Homebrew Casks — use the tap to publish a cask (modern casks flow)
+# If you also want a formula, enable the 'brews' section instead.
+
+casks:
+  - name: kush
+    repository:
+      owner: grimdork
+      name: homebrew-tools
+    commit_author:
+      name: grimdork
+      email: github@grimdork.net
+    homepage: "https://github.com/grimdork/kush"
+    description: "A tiny custom shell written in Go"
+    license: MIT
+    cask:
+      # The artifact pattern below should match the macOS archive produced by the builds
+      artifact: "kush_{{ .Version }}_darwin_amd64.tar.gz"
+      # install stanza: assumes the archive contains a single binary named 'kush'
+      install:
+        - "bin/kush"
+      # Optionally, provide a postflight or caveats block here if needed
+
+# macOS-specific packaging (pkg, dmg, etc.) can still be added below if desired
+
+signs:
+  - id: gpg-sign
+    cmd: gpg
+    args:
+      - --batch
+      - --pinentry-mode
+      - loopback
+      - --local-user
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+    artifacts: binary
