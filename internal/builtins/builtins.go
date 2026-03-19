@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"strconv"
 
 	"github.com/grimdork/kush/internal/aliases"
 	"github.com/grimdork/kush/internal/log"
@@ -88,6 +89,22 @@ func (b *Builtins) Handle(line string) bool {
 			} else if len(parts2) >= 2 {
 				key = parts2[0]
 				val = strings.Join(parts2[1:], " ")
+			}
+		}
+		// Handle quoted values so trailing spaces can be preserved.
+		if len(val) >= 2 {
+			// Double-quoted: allow Go-style escapes inside
+			if val[0] == '"' && val[len(val)-1] == '"' {
+				unq, err := strconv.Unquote(val)
+				if err == nil {
+					val = unq
+				} else {
+					// Fallback: strip quotes but keep interior verbatim
+					val = val[1 : len(val)-1]
+				}
+			} else if val[0] == '\'' && val[len(val)-1] == '\'' {
+				// Single-quoted: treat contents literally (do not interpret escapes)
+				val = val[1 : len(val)-1]
 			}
 		}
 		if key != "" {
