@@ -1,9 +1,8 @@
-# kush — a tiny custom shell
+# kush — Kubernetes utility shell
 
-Kush is a minimal terminal shell written in Go. It provides a custom
-single-line editor (no readline or go-prompt dependency), tab completion,
-command aliases, persistent history, and a PTY-backed command runner so
-interactive programs behave correctly.
+Kush is a terminal shell with built-in networking utilities, written in Go. It provides a custom
+single-line editor (no readline or go-prompt dependency), tab completion, command aliases, persistent
+history, and a PTY-backed command runner so interactive programs behave correctly.
 
 ## Features
 

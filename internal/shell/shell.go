@@ -2,16 +2,20 @@ package shell
 
 import (
 	"fmt"
+
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/grimdork/kush/internal/aliases"
 	"github.com/grimdork/kush/internal/builtins"
 	"github.com/grimdork/kush/internal/config"
 	"github.com/grimdork/kush/internal/ed"
 	"github.com/grimdork/kush/internal/log"
+	"github.com/grimdork/kush/internal/prompt"
 	"github.com/grimdork/kush/internal/runner"
 )
 
@@ -23,8 +27,41 @@ func Run() error {
 	}
 	defer le.Close()
 
-	// Reload aliases on SIGHUP so external tools can update the file and
-	// signal running shells to pick up changes.
+	bt := builtins.New()
+	al, _ := aliases.Load()
+	cfg, _ := config.Load()
+
+	// build prompt provider from env/config
+	pp := &prompt.Provider{Static: "$ ", TTL: 0}
+	if os.Getenv("KUSH_PROMPT_ALLOW_EXTERNAL") == "1" {
+		pp.AllowExternal = true
+	}
+	if v := os.Getenv("PROMPT"); v != "" {
+		pp.Static = v
+	}
+	if v := os.Getenv("PROMPT_CMD"); v != "" {
+		pp.Cmd = v
+	}
+	if cfg != nil {
+		if v, ok := cfg["PROMPT"]; ok && v != "" {
+			pp.Static = v
+		}
+		if v, ok := cfg["PROMPT_CMD"]; ok && v != "" {
+			pp.Cmd = v
+		}
+		if v, ok := cfg["PROMPT_TTL"]; ok && v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				pp.TTL = d
+			}
+		}
+		if v, ok := cfg["PROMPT_TIMEOUT_MS"]; ok && v != "" {
+			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+				pp.Timeout = time.Duration(ms) * time.Millisecond
+			}
+		}
+	}
+
+	// Reload config on SIGHUP and update prompt provider
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGHUP)
 	go func() {
@@ -34,15 +71,34 @@ func Run() error {
 			} else {
 				log.Debugf("aliases reloaded (SIGHUP)")
 			}
+			if c, err := config.Load(); err == nil {
+				if v, ok := c["PROMPT"]; ok {
+					pp.Static = v
+				}
+				if v, ok := c["PROMPT_CMD"]; ok {
+					pp.Cmd = v
+				}
+				if v, ok := c["PROMPT_TTL"]; ok {
+					if d, err := time.ParseDuration(v); err == nil {
+						pp.TTL = d
+					}
+				}
+				if v, ok := c["PROMPT_TIMEOUT_MS"]; ok {
+					if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+						pp.Timeout = time.Duration(ms) * time.Millisecond
+					}
+				}
+			}
+			// Also reload KUSH_ environment-controlled prompt immediately
+			if v := os.Getenv("KUSH_PROMPT"); v != "" {
+				// clear provider cache so next Get() re-evaluates
+				pp.Invalidate()
+			}
 		}
 	}()
 
-	bt := builtins.New()
-	al, _ := aliases.Load()
-	_, _ = config.Load()
-
 	for {
-		line, err := le.Prompt("$ ")
+		line, err := le.Prompt(pp.Get())
 		if err != nil {
 			if err == ed.ErrEOF {
 				fmt.Println()
