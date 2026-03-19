@@ -11,7 +11,7 @@ BINARY=kush
 DIST_DIR=dist
 VERSION?=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
-.PHONY: all build build-cross dist clean goreleaser-local-mac brew-formula release-draft
+.PHONY: all build build-cross dist clean package-brew brew-formula release-draft
 all: build
 
 build:
@@ -37,9 +37,9 @@ clean:
 
 # macOS goreleaser run locally — uses the macOS config (.goreleaser.yml)
 # Remove existing dist/ before invoking goreleaser to ensure a clean artifact set.
-goreleaser-local-mac:
+package-brew:
 	@rm -rf $(DIST_DIR)
-	@goreleaser release --snapshot --rm-dist --config .goreleaser.yml
+	@goreleaser release --clean --config .goreleaser.yml
 
 # Emit a Homebrew Cask file (Homebrew Casks system). This prints to dist/kush_cask.rb
 brew-formula:
