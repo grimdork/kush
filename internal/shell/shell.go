@@ -27,13 +27,12 @@ func Run() error {
 	}
 	defer le.Close()
 
-	bt := builtins.New()
 	al, _ := aliases.Load()
 	cfg, _ := config.Load()
 
 	// build prompt provider from env/config
 	pp := &prompt.Provider{Static: "$ ", TTL: 0}
-	if os.Getenv("KUSH_PROMPT_ALLOW_EXTERNAL") == "1" {
+		if os.Getenv("KUSH_PROMPT_ALLOW_EXTERNAL") == "1" {
 		pp.AllowExternal = true
 	}
 	if v := os.Getenv("PROMPT"); v != "" {
@@ -60,6 +59,9 @@ func Run() error {
 			}
 		}
 	}
+
+	// After prompt provider is constructed, create builtins with access to it so builtins can invalidate the prompt cache.
+	bt := builtins.New(pp)
 
 	// Reload config on SIGHUP and update prompt provider
 	sigc := make(chan os.Signal, 1)
