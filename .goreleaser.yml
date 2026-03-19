@@ -16,11 +16,10 @@ builds:
     goos:
       - darwin
     goarch:
-      - amd64
       - arm64
 
 release:
-  prerelease: true
+  prerelease: "true"
 
 archives:
   - wrap_in_directory: true
@@ -31,8 +30,6 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
-snapshot:
-  name_template: "{{ .Tag }}-next"
 
 changelog:
   sort: asc
