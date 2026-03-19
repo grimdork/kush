@@ -86,7 +86,75 @@ var helpTopics = map[string]string{
 	"exit": `%bold%lwhite exit%reset / %cyanCtrl+D%reset
 
   Exit the shell.`,
+
+	"get": `%bold%lwhite get%reset %cyan[-j] [-H "Key: Value"] <url>%reset
+
+  Perform an HTTP GET request and print the response body.
+
+  Flags:
+    %cyan-j%reset              Pretty-print JSON response
+    %cyan-H%reset %cyan"K: V"%reset       Add a request header (repeatable)
+
+  JSON responses are auto-detected and pretty-printed.
+  Output is pipe-friendly.
+
+  %grey Examples:%reset
+    %cyanget%reset https://api.example.com/data
+    %cyanget%reset -j https://httpbin.org/get
+    %cyanget%reset -H "Authorization: Bearer tok" https://api.example.com/me`,
+
+	"post": `%bold%lwhite post%reset %cyan[-j] [-H "Key: Value"] <url> [body]%reset
+
+  Perform an HTTP POST request. Content-Type is auto-detected:
+  JSON if body looks like %bold{}%reset or %bold[]%reset, otherwise form-encoded.
+
+  %grey Examples:%reset
+    %cyanpost%reset https://api.example.com/items '{"name":"thing"}'
+    %cyanpost%reset -H "Content-Type: text/plain" https://example.com hello`,
+
+	"put": `%bold%lwhite put%reset %cyan[-j] [-H "Key: Value"] <url> [body]%reset
+
+  Perform an HTTP PUT request. Same auto-detection as %cyanpost%reset.`,
+
+	"delete": `%bold%lwhite delete%reset %cyan[-j] [-H "Key: Value"] <url>%reset
+
+  Perform an HTTP DELETE request.`,
+
+	"head": `%bold%lwhite head%reset %cyan[-H "Key: Value"] <url>%reset
+
+  Perform an HTTP HEAD request and print response status and headers.`,
+
+	"fetch": `%bold%lwhite fetch%reset %cyan[-o outfile] <url>%reset
+
+  Download a URL to a file. Without %cyan-o%reset, writes to stdout.
+
+  %grey Examples:%reset
+    %cyanfetch%reset -o page.html https://example.com
+    %cyanfetch%reset https://example.com | grep title`,
+
+	"run": `%bold%lwhite run%reset %cyan<script> [args...]%reset
+
+  Execute a Tengo script. If the name has no path separator or extension,
+  the blessed script directory (%bold$KUSH_SCRIPTS%reset or %bold~/.kush/scripts/%reset)
+  is checked first.
+
+  Scripts have access to: %cyanargs%reset, %cyanenv_get%reset, %cyanenv_set%reset, %cyancwd%reset,
+  %cyanprint%reset, %cyanprintln%reset, %cyanprintf%reset, %cyanhttp_get%reset, %cyanhttp_post%reset,
+  plus the Tengo standard library.
+
+  %grey Examples:%reset
+    %cyanrun%reset myscript arg1 arg2
+    %cyanrun%reset ./scripts/deploy.tengo production`,
+
+	"eval": `%bold%lwhite eval%reset %cyan'<tengo expression>'%reset
+
+  Execute a Tengo one-liner.
+
+  %grey Examples:%reset
+    %cyaneval%reset 'println("hello")'
+    %cyaneval%reset 'printf("%%d\n", 2 + 2)'`,
 }
+
 
 // printHelp handles the "help" builtin. Returns true if it was handled.
 func printHelp(args []string) {
@@ -115,6 +183,19 @@ func printHelp(args []string) {
 	cfmt.Println("    %cyan reload%reset                    Reload aliases and env settings")
 	cfmt.Println("    %cyan which%reset prog [...]          Show program path")
 	cfmt.Println("    %cyan checksum%reset algo file        Compute file checksum")
+	cfmt.Println("")
+	cfmt.Println("%bold  HTTP:%reset")
+	cfmt.Println("    %cyan get%reset url                   HTTP GET (pipe-friendly)")
+	cfmt.Println("    %cyan post%reset url [body]           HTTP POST")
+	cfmt.Println("    %cyan put%reset url [body]            HTTP PUT")
+	cfmt.Println("    %cyan delete%reset url                HTTP DELETE")
+	cfmt.Println("    %cyan head%reset url                  HTTP HEAD (show headers)")
+	cfmt.Println("    %cyan fetch%reset url [-o file]       Download to file/stdout")
+	cfmt.Println("")
+	cfmt.Println("%bold  Scripting:%reset")
+	cfmt.Println("    %cyan run%reset script [args]         Run a Tengo script")
+	cfmt.Println("    %cyan eval%reset 'code'              Evaluate Tengo one-liner")
+	cfmt.Println("")
 	cfmt.Println("    %cyan help%reset [command]            This help")
 	cfmt.Println("")
 	cfmt.Println("%bold  Key bindings:%reset")

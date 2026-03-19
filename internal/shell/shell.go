@@ -17,6 +17,7 @@ import (
 	"github.com/grimdork/kush/internal/log"
 	"github.com/grimdork/kush/internal/prompt"
 	"github.com/grimdork/kush/internal/runner"
+	"github.com/grimdork/kush/internal/scripting"
 )
 
 // Run starts the REPL loop. It returns when the user exits or on error.
@@ -62,6 +63,23 @@ func Run() error {
 
 	// After prompt provider is constructed, create builtins with access to it so builtins can invalidate the prompt cache.
 	bt := builtins.New(pp)
+
+	// Register blessed Tengo scripts as builtins.
+	eng := scripting.New(pp)
+	for _, name := range eng.ListBlessed() {
+		scriptName := name // capture for closure
+		bt.RegisterHandler(scriptName, func(line string) bool {
+			tokens := strings.Fields(line)
+			var args []string
+			if len(tokens) > 1 {
+				args = tokens[1:]
+			}
+			if err := eng.RunBlessed(scriptName, args); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+			}
+			return true
+		})
+	}
 
 	// Reload config on SIGHUP and update prompt provider
 	sigc := make(chan os.Signal, 1)
