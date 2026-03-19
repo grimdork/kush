@@ -25,19 +25,21 @@ build-cross:
 	    echo "Building $$GOOS/$$GOARCH..."; \
 	    BIN=$(DIST_DIR)/$(BINARY)-$$GOOS-$$GOARCH; \
 	    env GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$BIN ./cmd/kush || exit 1; \
-	    tar -C $(DIST_DIR) -czf $$(basename $$BIN).tar.gz $$(basename $$BIN); \
+	    tar -C $(DIST_DIR) -czf $(DIST_DIR)/$$(basename $$BIN).tar.gz $$(basename $$BIN); \
 	  done; \
 	done
 
+# dist target builds cross artifacts into $(DIST_DIR)
 dist: build-cross
 
 clean:
 	rm -rf $(BINARY) $(DIST_DIR)
 
-# macOS goreleaser run locally — uses a separate config kept in the repo: .goreleaser.macos.yml
-# Intentionally does NOT push or publish; for local testing only.
+# macOS goreleaser run locally — uses the macOS config (.goreleaser.yml)
+# Remove existing dist/ before invoking goreleaser to ensure a clean artifact set.
 goreleaser-local-mac:
-	goreleaser release --snapshot --rm-dist --config .goreleaser.macos.yml
+	rm -rf $(DIST_DIR)
+	goreleaser release --snapshot --rm-dist --config .goreleaser.yml
 
 # Emit a Homebrew Cask file (Homebrew Casks system). This prints to dist/kush_cask.rb
 brew-formula:
