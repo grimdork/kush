@@ -8,8 +8,9 @@
 - [x] Ctrl+W/U/K kill shortcuts
 - [x] Alt/Option word movement and word-delete
 - [x] Config loader (~/.kush_config with PATH_FIRST)
-- [ ] Tab completion and zsh-like suggestions
-- [ ] SIGWINCH propagation to PTY
+- [x] Tab completion (path/command candidates, cycling)
+- [x] Export builtin (quoted values, prompt invalidation)
+- [x] SIGWINCH propagation to PTY
 - [ ] Ctrl+H history viewer (tcell overlay)
 - [ ] Integrate local repos (name, base) as builtins
 - [ ] Tengo plugin scaffold and mixed-script format
