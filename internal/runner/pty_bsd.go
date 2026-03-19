@@ -1,5 +1,5 @@
-//go:build darwin || freebsd || openbsd || netbsd
-// +build darwin freebsd openbsd netbsd
+//go:build freebsd || openbsd || netbsd
+// +build freebsd openbsd netbsd
 
 package runner
 
@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BSD/Darwin implementation using unix.Openpty when available.
+// BSD implementation using unix.Openpty when available (not for darwin).
 func openpty() (masterFD, slaveFD int, err error) {
 	m, s, err := unix.Openpty(nil, nil)
 	if err != nil {
