@@ -15,7 +15,7 @@ VERSION?=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 all: build
 
 build:
-	go build -o $(BINARY) ./cmd/kush
+	go build -o $(BINARY) ./
 
 build-cross:
 	@mkdir -p $(DIST_DIR)
@@ -24,7 +24,7 @@ build-cross:
 		for GOARCH in amd64 arm64; do \
 			echo "Building $$GOOS/$$GOARCH..."; \
 			BIN=$(DIST_DIR)/$(BINARY)-$$GOOS-$$GOARCH; \
-			env GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$BIN ./cmd/kush || exit 1; \
+			env GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$BIN ./ || exit 1; \
 			tar -C $(DIST_DIR) -czf $(DIST_DIR)/$$(basename $$BIN).tar.gz $$(basename $$BIN); \
 		done; \
 	done
@@ -44,21 +44,20 @@ goreleaser-local-mac:
 # Emit a Homebrew Cask file (Homebrew Casks system). This prints to dist/kush_cask.rb
 brew-formula:
 	@mkdir -p $(DIST_DIR)
-	@cat > $(DIST_DIR)/kush_cask.rb <<'EOF'
- cask "kush" do
-   version "$(VERSION)"
-   sha256 "REPLACE_WITH_SHA256"
-
-   url "https://github.com/grimdork/kush/releases/download/$(VERSION)/kush_$(VERSION)_darwin_amd64.tar.gz"
-   name "kush"
-   desc "kush — small interactive shell"
-   homepage "https://github.com/grimdork/kush"
-
-   binary "kush"
-
-   zap trash: "~/.kush_history"
- end
- EOF
+	@printf '%s\n' 'cask "kush" do' \
+		'  version "$(VERSION)"' \
+		'  sha256 "REPLACE_WITH_SHA256"' \
+		'' \
+		'  url "https://github.com/grimdork/kush/releases/download/$(VERSION)/kush_$(VERSION)_darwin_amd64.tar.gz"' \
+		'  name "kush"' \
+		'  desc "kush — small interactive shell"' \
+		'  homepage "https://github.com/grimdork/kush"' \
+		'' \
+		'  binary "kush"' \
+		'' \
+		'  zap trash: "~/.kush_history"' \
+		'end' \
+		> $(DIST_DIR)/kush_cask.rb
 	@echo "Wrote $(DIST_DIR)/kush_cask.rb — update URL/sha256 as needed."
 
 # Create a GitHub release draft and upload artifacts. Requires gh CLI and that you are authenticated.
