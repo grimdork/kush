@@ -10,13 +10,16 @@ import (
 
 	"github.com/grimdork/kush/internal/aliases"
 	"github.com/grimdork/kush/internal/log"
+	"github.com/grimdork/kush/internal/prompt"
 )
 
 // Builtins provides handling for built-in commands that are executed directly by the shell rather than via exec.
-type Builtins struct{}
+type Builtins struct{
+	pp *prompt.Provider
+}
 
-// New returns a new Builtins instance. Currently there is no state, but this allows for future expansion if needed.
-func New() *Builtins { return &Builtins{} }
+// New returns a new Builtins instance. Pass a prompt.Provider so builtins can invalidate the prompt cache on env changes.
+func New(pp *prompt.Provider) *Builtins { return &Builtins{pp: pp} }
 
 // Handle returns true if the line was handled by a builtin.
 func (b *Builtins) Handle(line string) bool {
@@ -59,6 +62,40 @@ func (b *Builtins) Handle(line string) bool {
 			fmt.Printf("checksum %s %s\n", algo, file)
 		default:
 			log.Errorf("unknown algorithm")
+		}
+		return true
+	case "export":
+		// export KEY=VALUE or export KEY VALUE
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "export"))
+		if rest == "" {
+			// list environment
+			for _, e := range os.Environ() {
+				fmt.Println(e)
+			}
+			return true
+		}
+		var key, val string
+		if strings.Contains(rest, "=") {
+			parts2 := strings.SplitN(rest, "=", 2)
+			key = strings.TrimSpace(parts2[0])
+			val = parts2[1]
+		} else {
+			parts2 := strings.Fields(rest)
+			if len(parts2) == 1 {
+				// export KEY -> export existing value
+				key = parts2[0]
+				val = os.Getenv(key)
+			} else if len(parts2) >= 2 {
+				key = parts2[0]
+				val = strings.Join(parts2[1:], " ")
+			}
+		}
+		if key != "" {
+			os.Setenv(key, val)
+			// If we have a prompt provider, invalidate its cache so the running REPL picks up changes immediately.
+			if b.pp != nil {
+				b.pp.Invalidate()
+			}
 		}
 		return true
 	case "alias":
