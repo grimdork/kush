@@ -551,6 +551,23 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 			}
 		}
 
+		// Ctrl+H: history viewer
+		if r == 8 {
+			ed.resetCompletion()
+			selected := ed.historyViewer(reader)
+			// History may have been modified by deletions — reset index
+			histIdx = len(ed.history)
+			// Re-query terminal size since we used alt screen
+			renderLine(prompt, buf, cursor)
+			if selected != "" {
+				buf = []rune(selected)
+				cursor = len(buf)
+				renderLine(prompt, buf, cursor)
+			}
+			ensureCursor(prompt, buf, cursor)
+			continue
+		}
+
 		// backspace/delete (direct)
 		if r == 127 {
 			if cursor > 0 {
