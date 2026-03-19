@@ -20,6 +20,11 @@ func New(pp *prompt.Provider) *Builtins {
 	return b
 }
 
+// RegisterHandler adds a dynamic builtin handler at runtime.
+func (b *Builtins) RegisterHandler(name string, fn func(string) bool) {
+	b.handlers[name] = fn
+}
+
 // Handle returns true if the line was handled by a builtin.
 func (b *Builtins) Handle(line string) bool {
 	parts := strings.Fields(line)
