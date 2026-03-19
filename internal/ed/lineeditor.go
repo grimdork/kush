@@ -530,7 +530,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						}
 						buf = append(buf[:cursor], buf[i:]...)
 					}
-				case 127, 8: // alt+backspace (ESC+DEL or ESC+BS)
+				case 127: // alt+backspace (ESC+DEL)
 					if cursor > 0 {
 						i := cursor - 1
 						for i >= 0 && buf[i] == ' ' {
@@ -552,7 +552,7 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 		}
 
 		// backspace/delete (direct)
-		if r == 127 || r == 8 {
+		if r == 127 {
 			if cursor > 0 {
 				buf = append(buf[:cursor-1], buf[cursor:]...)
 				cursor--
