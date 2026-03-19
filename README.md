@@ -14,9 +14,12 @@ history, and a PTY-backed command runner so interactive programs behave correctl
   `posix_openpt` on Linux) with automatic fallback to plain `exec` on
   unsupported platforms.
 - **Aliases** — loaded from `~/.kush_aliases` (or `$KUSH_ALIASES`), with
-  two-pass chained expansion and live reload via `alias -r` or SIGHUP.
-- **Builtins** — `cd`, `history`, `alias`, `unalias`, `reload`, `which`,
-  `help`, `checksum` (stub).
+  two-pass chained expansion and live reload via `reload` or SIGHUP.
+- **Pipelines and redirects** — builtins can pipe into external commands
+  and redirect to files (`>`, `>>`).
+- **Builtins** — `cd`, `export`, `history`, `alias`, `unalias`, `reload`,
+  `which`, `help`, `checksum`, plus HTTP (`get`, `post`, `put`, `delete`,
+  `head`, `fetch`) and scripting (`run`, `eval`).
 - **Config** — optional `~/.kush_config` for key=value settings like
   `PATH_FIRST`.
 
@@ -46,6 +49,7 @@ Requires Go 1.25+ and cgo on macOS (for `openpty`).
 | Ctrl+U                | Kill to start of line        |
 | Ctrl+K                | Kill to end of line          |
 | Ctrl+C                | Clear current line           |
+| Ctrl+H                | Open history viewer          |
 | Ctrl+D                | Exit (EOF)                   |
 
 ## Terminal configuration
@@ -91,30 +95,90 @@ ll=ls -la
 Chained aliases work: if `la` expands to `ls -la` and `ls` expands to
 `ls --color=yes`, the result is `ls --color=yes -la` (without duplicate flags).
 
-Reload from within the shell with `alias -r` or from outside with
+Reload aliases from within the shell with `reload`, or from outside with
 `kill -HUP <pid>`.
+
+To bypass alias expansion for a single command, wrap it in parentheses:
+
+```
+(ls)          # runs /bin/ls directly, even if ls is aliased
+(grep) foo    # skips any grep alias
+```
+
+## Pipelines and redirects
+
+Builtins can participate in pipelines and redirects, just like external
+commands:
+
+```
+history | grep ssh           # pipe builtin output to an external command
+get https://example.com | grep title
+history > ~/cmds.txt         # redirect to file
+history >> ~/cmds.txt        # append to file
+```
+
+The first command in a pipeline can be a builtin; its output is captured and
+fed into the rest of the pipeline, which is executed via `sh -c`. Redirect
+operators (`>`, `>>`) work the same way.
+
+Quotes inside commands are respected — pipes and redirects inside quoted
+strings are treated as literal characters.
+
+## History viewer
+
+Press **Ctrl+H** to open a full-screen history viewer with search and
+navigation:
+
+| Key            | Action                              |
+|----------------|-------------------------------------|
+| ↑ / ↓ / j / k | Move selection                      |
+| PgUp / PgDn    | Scroll by page                      |
+| g / G          | Jump to top / bottom                |
+| Home / End     | Jump to top / bottom                |
+| /              | Start incremental search            |
+| Esc (in search)| Return to list, keeping filter      |
+| Enter          | Select entry into the command line  |
+| d / Delete     | Mark entry for deletion             |
+| Esc / q        | Close viewer                        |
+
+Deleted entries are removed from both memory and `~/.kush_history` when the
+viewer closes.
 
 ## Project structure
 
 ```
 main.go                          Entry point
 internal/
-  shell/shell.go                 REPL loop
+  shell/
+    shell.go                     REPL loop
+    pipeline.go                  Pipeline and redirect parsing/execution
+    execute.go                   Pipeline executor
   ed/                            Line editor and termios helpers
     lineeditor.go                Editor implementation
+    history_viewer.go            Ctrl+H history browser
     term_darwin.go               macOS termios (raw mode)
     term_linux.go                Linux termios
   completion/completion.go       Tab completion (commands + paths)
   runner/                        Command execution
     pty_runner.go                PTY runner + plain-exec fallback
-    run_shell.go                 Shell-mode execution
+    run_shell.go                 Shell-mode execution (darwin)
+    run_shell_linux.go           Shell-mode execution (linux)
     pty_darwin.go                openpty via cgo (macOS)
     pty_linux.go                 posix_openpt (Linux)
     pty_unsupported.go           Stub for other platforms
+    winsize.go                   SIGWINCH propagation
   aliases/aliases.go             Alias loading, expansion, persistence
   builtins/
-    builtins.go                  Shell builtins
-    help.go                      Help text
+    builtins.go                  Builtin registry and dispatch
+    register.go                  Init-based handler registration
+    cd.go, export.go, history.go, alias.go, which.go, checksum.go
+    help.go, help_print.go       Help text (cfmt coloured)
+    http.go                      HTTP builtins (get, post, put, etc.)
+    script.go                    Tengo scripting (run, eval)
+  httpclient/client.go           Shared HTTP client
+  scripting/
+    engine.go                    Tengo runtime
+    http.go                      HTTP module for Tengo scripts
   config/config.go               Config file loader
   log/log.go                     Levelled logging
 ```

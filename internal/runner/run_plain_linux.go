@@ -22,7 +22,7 @@ func runPlain(line string) error {
 		shell = "sh"
 	}
 
-	cmd := exec.Command(shell, "-lc", line)
+	cmd := exec.Command(shell, "-c", line)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

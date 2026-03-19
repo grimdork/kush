@@ -193,6 +193,26 @@ func (ed *Editor) resetCompletion() {
 	ed.inCompletion = false
 }
 
+// longestCommonPrefix returns the longest common prefix of all candidates.
+func longestCommonPrefix(cands []string) string {
+	if len(cands) == 0 {
+		return ""
+	}
+	prefix := cands[0]
+	for _, c := range cands[1:] {
+		for i := 0; i < len(prefix) && i < len(c); i++ {
+			if prefix[i] != c[i] {
+				prefix = prefix[:i]
+				break
+			}
+		}
+		if len(c) < len(prefix) {
+			prefix = prefix[:len(c)]
+		}
+	}
+	return prefix
+}
+
 // renderCandidates renders two rows of candidates and a prompt line below them.
 //
 // Layout (all downward from the current cursor line):
@@ -543,7 +563,18 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 						cursor = i + 1
 					}
 				default:
-					// ignore other alt combos
+					// Insert printable alt combos as literal characters.
+					// This covers international keyboards where Option+key
+					// produces characters like \ { } [ ] ~ on Nordic layouts.
+					if r1 >= 32 && r1 != 127 {
+						if cursor == len(buf) {
+							buf = append(buf, r1)
+						} else {
+							buf = append(buf[:cursor+1], buf[cursor:]...)
+							buf[cursor] = r1
+						}
+						cursor++
+					}
 				}
 				renderLine(prompt, buf, cursor)
 				ensureCursor(prompt, buf, cursor)
@@ -581,13 +612,17 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 
 		// Tab completion
 		if r == 9 {
-			// call completer
+			// Bash/zsh-style tab completion:
+			// 1. Compute candidates from current buffer.
+			// 2. If one candidate: insert it (+ space if file, no space if dir).
+			// 3. If multiple: insert longest common prefix, show candidates.
+			// 4. Repeated Tab with same candidates: cycle through them.
 			start, cands := completion.Complete(string(buf), cursor)
 			if len(cands) == 0 {
-				// nothing
 				continue
 			}
-			// If we have an existing candidate list and same start, cycle
+
+			// Repeated Tab on same candidate set — cycle.
 			if ed.compCandidates != nil && ed.compStart == start && len(ed.compCandidates) > 0 {
 				ed.compIndex = (ed.compIndex + 1) % len(ed.compCandidates)
 				_, _, visible, _, _ := ed.compLayout()
@@ -597,47 +632,61 @@ func (ed *Editor) Prompt(prompt string) (string, error) {
 					ed.compPageStart = ed.compIndex - (ed.compIndex % visible)
 				}
 				cand := ed.compCandidates[ed.compIndex]
-				// replace buffer from start..cursor with cand
 				newBuf := []rune(cand)
 				newLine := append([]rune(string(buf[:start])), newBuf...)
-				// append rest of original after cursor
 				if cursor < len(buf) {
 					newLine = append(newLine, buf[cursor:]...)
 				}
 				buf = newLine
 				cursor = start + len(newBuf)
-				// redraw candidate page below
 				ed.renderCandidates(prompt, buf, cursor)
 				continue
 			}
-			// fresh candidate list
-			ed.compCandidates = cands
-			ed.compStart = start
-			ed.compIndex = 0
-			ed.compPageStart = 0
+
 			if len(cands) == 1 {
-				// single candidate -> insert with trailing space if appropriate
 				cand := cands[0]
-				newBuf := []rune(cand + " ")
+				suffix := " "
+				if strings.HasSuffix(cand, "/") {
+					suffix = ""
+				}
+				newBuf := []rune(cand + suffix)
 				newLine := append([]rune(string(buf[:start])), newBuf...)
 				if cursor < len(buf) {
 					newLine = append(newLine, buf[cursor:]...)
 				}
 				buf = newLine
 				cursor = start + len(newBuf)
+				ed.resetCompletion()
 				renderLine(prompt, buf, cursor)
 				ensureCursor(prompt, buf, cursor)
 				continue
 			}
-			// multiple candidates: insert first candidate into buffer and show page
-			cand := cands[0]
-			newBuf := []rune(cand)
-			newLine := append([]rune(string(buf[:start])), newBuf...)
-			if cursor < len(buf) {
-				newLine = append(newLine, buf[cursor:]...)
+
+			// Multiple candidates: insert longest common prefix.
+			lcp := longestCommonPrefix(cands)
+			currentToken := string(buf[start:cursor])
+			if lcp != currentToken {
+				// We extended the input — insert the common prefix and
+				// re-complete (the narrowed set may be just one).
+				newBuf := []rune(lcp)
+				newLine := append([]rune(string(buf[:start])), newBuf...)
+				if cursor < len(buf) {
+					newLine = append(newLine, buf[cursor:]...)
+				}
+				buf = newLine
+				cursor = start + len(newBuf)
+				ed.resetCompletion()
+				renderLine(prompt, buf, cursor)
+				ensureCursor(prompt, buf, cursor)
+				continue
 			}
-			buf = newLine
-			cursor = start + len(newBuf)
+
+			// Common prefix == current token, can't narrow further.
+			// Show candidate list and allow cycling.
+			ed.compCandidates = cands
+			ed.compStart = start
+			ed.compIndex = 0
+			ed.compPageStart = 0
 			ed.renderCandidates(prompt, buf, cursor)
 			continue
 		}
