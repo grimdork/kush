@@ -38,18 +38,6 @@ changelog:
       - '^docs:'
       - '^test:'
 
-homebrew_casks:
-  - name: kush
-    repository:
-      owner: grimdork
-      name: homebrew-tools
-    commit_author:
-      name: grimdork
-      email: github@grimdork.net
-    homepage: "https://github.com/grimdork/kush"
-    description: "Kubernetes utility shell"
-    license: MIT
-
 # Publish a Homebrew formula into a tap repository. Goreleaser will create or update the formula
 # in the specified repository (e.g. grimdork/homebrew-tools). Adjust repository/name if you prefer
 # a different tap (like homebrew-kush).
