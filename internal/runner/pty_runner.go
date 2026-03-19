@@ -36,8 +36,4 @@ func restoreTermios(fd int, t unix.Termios) error {
 	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
 }
 
-func propagateWinSize(masterFd int) {
-	// TODO: copy the real terminal's winsize to the PTY master and listen
-	// for SIGWINCH to keep it in sync.
-	_ = masterFd
-}
+
