@@ -6,3 +6,5 @@ require (
 	github.com/grimdork/climate v0.24.6
 	golang.org/x/sys v0.40.0
 )
+
+require github.com/d5/tengo/v2 v2.17.0 // indirect
