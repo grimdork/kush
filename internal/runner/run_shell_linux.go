@@ -36,10 +36,13 @@ func RunShell(line string) error {
 
 	cmd := exec.Command(shell, "-lc", line)
 	log.Debugf("pty exec: %s -lc %q", shell, line)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+		Ctty:   int(slave.Fd()),
+	}
 
 	// Switch stdin to passthrough mode before starting the child.
 	stdinFd := int(os.Stdin.Fd())
@@ -61,7 +64,7 @@ func RunShell(line string) error {
 	// EOF/EIO promptly when the child exits.
 	slave.Close()
 
-	propagateWinSize(masterFd)
+	stopWinSize := propagateWinSize(masterFd)
 
 	// Forward signals to the child's process group.
 	sigc := make(chan os.Signal, 1)
@@ -150,6 +153,7 @@ func RunShell(line string) error {
 
 	signal.Stop(sigc)
 	close(sigc)
+	stopWinSize()
 
 	if termErr == nil {
 		restoreTermios(stdinFd, oldTermios)
