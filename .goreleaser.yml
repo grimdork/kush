@@ -14,9 +14,7 @@ builds:
     env:
       - CGO_ENABLED=0
     goos:
-      - linux
       - darwin
-      - freebsd
     goarch:
       - amd64
       - arm64
@@ -43,8 +41,10 @@ changelog:
       - '^docs:'
       - '^test:'
 
-# Homebrew (v2 schema)
-brews:
+# Homebrew Casks — use the tap to publish a cask (modern casks flow)
+# If you also want a formula, enable the 'brews' section instead.
+
+casks:
   - name: kush
     repository:
       owner: grimdork
@@ -55,28 +55,16 @@ brews:
     homepage: "https://github.com/grimdork/kush"
     description: "A tiny custom shell written in Go"
     license: MIT
+    cask:
+      # The artifact pattern below should match the macOS archive produced by the builds
+      artifact: "kush_{{ .Version }}_darwin_amd64.tar.gz"
+      # install stanza: assumes the archive contains a single binary named 'kush'
+      install:
+        - "bin/kush"
+      # Optionally, provide a postflight or caveats block here if needed
 
-# NFPM (packaging) — conservative v2 fields
-nfpms:
-  - package_name: kush
-    vendor: "grimdork.net"
-    maintainer: "Grimdork <github@grimdork.net>"
-    homepage: "https://github.com/grimdork/kush"
-    description: "A tiny custom shell written in Go"
-    license: MIT
-    formats:
-      - deb
-      - rpm
-    bindir: "/usr/bin"
-    section: contrib
-    priority: extra
-    contents:
-      - src: LICENSE
-        dst: "/usr/share/doc/kush/LICENSE"
-      - src: README.md
-        dst: "/usr/share/doc/kush/README.md"
+# macOS-specific packaging (pkg, dmg, etc.) can still be added below if desired
 
-# Binary signing (v2: BinarySign)
 signs:
   - id: gpg-sign
     cmd: gpg
