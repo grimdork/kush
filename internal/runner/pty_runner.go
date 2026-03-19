@@ -4,15 +4,6 @@
 package runner
 
 import (
-	"os"
-	"os/exec"
-	"os/signal"
-	"sync"
-	"syscall"
-	"time"
-
-	"github.com/grimdork/kush/internal/log"
-
 	"golang.org/x/sys/unix"
 )
 
