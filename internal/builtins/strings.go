@@ -1,6 +1,21 @@
 package builtins
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+func init() {
+	Register("split", handleSplit)
+}
+
+func handleSplit(b *Builtins, line string) bool {
+	tokens := shellSplit(line)
+	for _, t := range tokens[1:] {
+		fmt.Println(t)
+	}
+	return true
+}
 
 // shellSplit splits a command line respecting single and double quotes.
 func shellSplit(line string) []string {
