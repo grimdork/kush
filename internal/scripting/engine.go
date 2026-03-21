@@ -402,6 +402,21 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
+	_ = script.Add("env_get", &tengo.UserFunction{
+		Name: "env_get",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val := os.Getenv(key)
+			return &tengo.String{Value: val}, nil
+		},
+	})
+
 	_ = script.Add("env_set", &tengo.UserFunction{
 		Name: "env_set",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
@@ -493,7 +508,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 
 	_, err := script.RunContext(context.Background())
 	if err != nil {
-			sMsg := err.Error()
+		sMsg := err.Error()
 		// If the script produced a help/usage-style error (multi-line with option
 		// markers), print the help text directly and don't treat it as a fatal
 		// error. This avoids the top-level log.Fatal from prefixing the message
