@@ -618,11 +618,33 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	// alias for port_check
+	// alias for port_check (duplicate implementation to avoid referencing script internals)
 	_ = script.Add("checkport", &tengo.UserFunction{
 		Name: "checkport",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			return script.Objects["port_check"].(*tengo.UserFunction).Value(a...)
+			if len(a) < 2 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			host, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
+			}
+			var portStr string
+			if s, ok := tengo.ToString(a[1]); ok {
+				portStr = s
+			} else if i, ok := tengo.ToInt(a[1]); ok {
+				portStr = strconv.Itoa(int(i))
+			} else {
+				return nil, tengo.ErrInvalidArgumentType{Name: "port", Expected: "string|int", Found: a[1].TypeName()}
+			}
+			addr := net.JoinHostPort(host, portStr)
+			timeout := 2 * time.Second
+			conn, err := net.DialTimeout("tcp", addr, timeout)
+			if err != nil {
+				return tengo.FalseValue, nil
+			}
+			_ = conn.Close()
+			return tengo.TrueValue, nil
 		},
 	})
 
