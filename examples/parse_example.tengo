@@ -1,4 +1,4 @@
-#!/usr/bin/env kush
+#!/opt/homebrew/bin/kush
 // parse_example.tengo -- example showing parseKeywords usage
 
 println("Initial kush.args:", kush.args)
