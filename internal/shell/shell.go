@@ -3,7 +3,9 @@ package shell
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,6 +21,66 @@ import (
 	"github.com/grimdork/kush/internal/scripting"
 )
 
+// parseArgs splits a command line into arguments similar to a simple shell.
+// Supports single quotes (literal), double quotes (with backslash escapes),
+// and backslash escapes outside quotes.
+func parseArgs(line string) []string {
+	var out []string
+	var buf strings.Builder
+	inSingle := false
+	inDouble := false
+	escape := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if escape {
+			buf.WriteByte(c)
+			escape = false
+			continue
+		}
+		if c == '\\' {
+			escape = true
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			} else {
+				buf.WriteByte(c)
+			}
+			continue
+		}
+		if inDouble {
+			if c == '"' {
+				inDouble = false
+			} else {
+				buf.WriteByte(c)
+			}
+			continue
+		}
+		// not in any quote
+		if c == '\'' {
+			inSingle = true
+			continue
+		}
+		if c == '"' {
+			inDouble = true
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\n' {
+			if buf.Len() > 0 {
+				out = append(out, buf.String())
+				buf.Reset()
+			}
+			continue
+		}
+		buf.WriteByte(c)
+	}
+	if buf.Len() > 0 {
+		out = append(out, buf.String())
+	}
+	return out
+}
+
 // Run starts the REPL loop. It returns when the user exits or on error.
 func Run() error {
 	le, err := ed.New()
@@ -32,7 +94,7 @@ func Run() error {
 
 	// build prompt provider from env/config
 	pp := &prompt.Provider{Static: "$ ", TTL: 0}
-		if os.Getenv("KUSH_PROMPT_ALLOW_EXTERNAL") == "1" {
+	if os.Getenv("KUSH_PROMPT_ALLOW_EXTERNAL") == "1" {
 		pp.AllowExternal = true
 	}
 	if v := os.Getenv("PROMPT"); v != "" {
@@ -68,7 +130,7 @@ func Run() error {
 	for _, name := range eng.ListBlessed() {
 		scriptName := name // capture for closure
 		bt.RegisterHandler(scriptName, func(line string) bool {
-			tokens := strings.Fields(line)
+			tokens := parseArgs(line)
 			var args []string
 			if len(tokens) > 1 {
 				args = tokens[1:]
@@ -138,8 +200,8 @@ func Run() error {
 			orig := line
 			first := al.Expand(line)
 			if first != line {
-				origTok := strings.Fields(line)
-				newTok := strings.Fields(first)
+				origTok := parseArgs(line)
+				newTok := parseArgs(first)
 				if len(origTok) > 0 && len(newTok) > 0 && origTok[0] != newTok[0] {
 					line = al.Expand(first)
 				} else {
@@ -161,6 +223,55 @@ func Run() error {
 		// Simple builtin (no pipes or redirects).
 		if bt.Handle(line) {
 			continue
+		}
+
+		// If the line refers to a .t or .tengo file, run it with the scripting engine
+		// so scripts execute like normal programs. Require the file to be executable
+		// (+x). Check the blessed scripts dir first, then PATH.
+		toks := parseArgs(line)
+		if len(toks) > 0 {
+			first := toks[0]
+			ext := filepath.Ext(first)
+			if ext == ".t" || ext == ".tengo" {
+				var path string
+				// If an explicit path was provided (contains / or starts with .), use it.
+				if strings.Contains(first, "/") || strings.HasPrefix(first, ".") {
+					path = first
+				} else {
+					// Check blessed scripts directory first.
+					blessed := eng.BlessedDir()
+					if blessed != "" {
+						cand := filepath.Join(blessed, first)
+						if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+							path = cand
+						}
+					}
+					// If not found in blessed dir, fall back to PATH lookup.
+					if path == "" {
+						if p, err := exec.LookPath(first); err == nil {
+							path = p
+						}
+					}
+				}
+
+				if path != "" {
+					if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+						// Require executable bit
+						if fi.Mode()&0111 == 0 {
+							fmt.Fprintf(os.Stderr, "error: script not executable: %s\n", path)
+						} else {
+							args := []string{}
+							if len(toks) > 1 {
+								args = toks[1:]
+							}
+							if err := eng.RunFile(path, args); err != nil {
+								fmt.Fprintln(os.Stderr, "error:", err)
+							}
+							continue
+						}
+					}
+				}
+			}
 		}
 
 		// External command — close the editor so the child gets a
