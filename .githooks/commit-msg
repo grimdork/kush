@@ -1,0 +1,40 @@
+#!/bin/sh
+# Simple commit-msg hook: ensure the first character of the commit message is an uppercase letter.
+# This is a light enforcement of the 'Capitalised verb forming a sentence' style.
+
+MSG_FILE="$1"
+if [ -z "$MSG_FILE" ]; then
+  echo "commit-msg hook: no message file provided"
+  exit 1
+fi
+
+# Read first non-empty line
+MSG_LINE=""
+while IFS= read -r line; do
+  # Skip leading blank lines
+  if [ -n "$(printf '%s' "$line" | tr -d '\r\n' )" ]; then
+    MSG_LINE="$line"
+    break
+  fi
+done < "$MSG_FILE"
+
+if [ -z "$MSG_LINE" ]; then
+  echo "Aborting commit: empty commit message"
+  exit 1
+fi
+
+# Trim leading whitespace
+MSG_LINE_TRIMMED=$(printf '%s' "$MSG_LINE" | sed 's/^[[:space:]]*//')
+FIRST_CHAR=$(printf '%s' "$MSG_LINE_TRIMMED" | cut -c1)
+
+case "$FIRST_CHAR" in
+  [A-Z])
+    # OK
+    exit 0
+    ;;
+  *)
+    echo "Aborting commit: commit message must start with a capitalised verb forming a sentence (e.g., 'Add feature X')."
+    echo "Commit message first line: '$MSG_LINE_TRIMMED'"
+    exit 1
+    ;;
+esac
