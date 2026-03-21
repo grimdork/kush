@@ -622,7 +622,9 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	// dig(host) -> array of IP strings (deterministic: IPv4 addresses first)
+	// dig(host) -> object with ipv4 and ipv6 helpers:
+	// d.ipv4.first() -> string
+	// d.ipv4.all()   -> array[string] (alphanumerically sorted)
 	_ = script.Add("dig", &tengo.UserFunction{
 		Name: "dig",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
@@ -649,12 +651,49 @@ func (e *Engine) run(code, filename string, args []string) error {
 					v6s = append(v6s, ip.String())
 				}
 			}
-			ordered := append(v4s, v6s...)
-			arr := make([]tengo.Object, len(ordered))
-			for i, ip := range ordered {
-				arr[i] = &tengo.String{Value: ip}
+			sort.Strings(v4s)
+			sort.Strings(v6s)
+
+			// build helper functions
+			ipv4Map := map[string]tengo.Object{}
+			ipv4Map["first"] = &tengo.UserFunction{
+				Name: "first",
+				Value: func(a ...tengo.Object) (tengo.Object, error) {
+					if len(v4s) == 0 {
+						return &tengo.String{Value: ""}, nil
+					}
+					return &tengo.String{Value: v4s[0]}, nil
+				},
 			}
-			return &tengo.Array{Value: arr}, nil
+			ipv4Map["all"] = &tengo.UserFunction{
+				Name: "all",
+				Value: func(a ...tengo.Object) (tengo.Object, error) {
+					return toTengoArray(v4s), nil
+				},
+			}
+
+			ipv6Map := map[string]tengo.Object{}
+			ipv6Map["first"] = &tengo.UserFunction{
+				Name: "first",
+				Value: func(a ...tengo.Object) (tengo.Object, error) {
+					if len(v6s) == 0 {
+						return &tengo.String{Value: ""}, nil
+					}
+					return &tengo.String{Value: v6s[0]}, nil
+				},
+			}
+			ipv6Map["all"] = &tengo.UserFunction{
+				Name: "all",
+				Value: func(a ...tengo.Object) (tengo.Object, error) {
+					return toTengoArray(v6s), nil
+				},
+			}
+
+			res := &tengo.Map{Value: map[string]tengo.Object{
+				"ipv4": &tengo.Map{Value: ipv4Map},
+				"ipv6": &tengo.Map{Value: ipv6Map},
+			}}
+			return res, nil
 		},
 	})
 
