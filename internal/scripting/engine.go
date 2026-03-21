@@ -49,6 +49,8 @@ func (e *Engine) ListBlessed() []string {
 		name := entry.Name()
 		if strings.HasSuffix(name, ".tengo") {
 			names = append(names, strings.TrimSuffix(name, ".tengo"))
+		} else if strings.HasSuffix(name, ".t") {
+			names = append(names, strings.TrimSuffix(name, ".t"))
 		}
 	}
 	return names
@@ -63,10 +65,17 @@ func (e *Engine) RunFile(path string, args []string) error {
 	return e.run(string(data), path, args)
 }
 
-// RunBlessed executes a blessed script by name.
+// RunBlessed executes a blessed script by name. It will prefer .tengo, then .t.
 func (e *Engine) RunBlessed(name string, args []string) error {
-	path := filepath.Join(e.blessedDir, name+".tengo")
-	return e.RunFile(path, args)
+	p1 := filepath.Join(e.blessedDir, name+".tengo")
+	if _, err := os.Stat(p1); err == nil {
+		return e.RunFile(p1, args)
+	}
+	p2 := filepath.Join(e.blessedDir, name+".t")
+	if _, err := os.Stat(p2); err == nil {
+		return e.RunFile(p2, args)
+	}
+	return fmt.Errorf("blessed script not found: %s", name)
 }
 
 // Eval executes a Tengo expression/script string.
@@ -74,7 +83,25 @@ func (e *Engine) Eval(code string) error {
 	return e.run(code, "<eval>", nil)
 }
 
+func toTengoArray(vals []string) *tengo.Array {
+	arr := make([]tengo.Object, len(vals))
+	for i, v := range vals {
+		arr[i] = &tengo.String{Value: v}
+	}
+	return &tengo.Array{Value: arr}
+}
+
 func (e *Engine) run(code, filename string, args []string) error {
+	// If code starts with a shebang (#!), strip the first line so the Tengo parser
+	// doesn't choke on it. This lets scripts start with "#!/usr/bin/env kush".
+	if strings.HasPrefix(code, "#!") {
+		if idx := strings.Index(code, "\n"); idx >= 0 {
+			code = code[idx+1:]
+		} else {
+			code = ""
+		}
+	}
+
 	script := tengo.NewScript([]byte(code))
 
 	// Add standard library modules
@@ -82,32 +109,291 @@ func (e *Engine) run(code, filename string, args []string) error {
 		"math", "text", "times", "rand", "fmt", "json", "base64", "hex", "os",
 	))
 
-	// Set script args
+	// Set script args (args slice contains user args only, program name stripped)
 	if args == nil {
 		args = []string{}
 	}
-	argsObj := make([]tengo.Object, len(args))
-	for i, a := range args {
-		argsObj[i] = &tengo.String{Value: a}
-	}
-	_ = script.Add("args", &tengo.Array{Value: argsObj})
+	argsArr := toTengoArray(args)
+	_ = script.Add("args", argsArr)
 
-	// Add kush module functions as top-level variables
-	_ = script.Add("env_get", &tengo.UserFunction{
-		Name: "env_get",
+	// Provide a `kush` object with metadata: name, path, args
+	progName := filepath.Base(filename)
+	kushMap := &tengo.Map{Value: map[string]tengo.Object{
+		"name": &tengo.String{Value: progName},
+		"path": &tengo.String{Value: filename},
+		"args": argsArr,
+	}}
+	_ = script.Add("kush", kushMap)
+
+	// CLI type constants
+	_ = script.Add("FLAG", &tengo.Int{Value: 0})
+	_ = script.Add("STRING", &tengo.Int{Value: 1})
+	_ = script.Add("INT", &tengo.Int{Value: 2})
+
+	// parseKeywords(spec, type, spec, type, ...) -> map (does not exit the process)
+	_ = script.Add("parseKeywords", &tengo.UserFunction{
+		Name: "parseKeywords",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 1 {
+			// specs come in pairs: specString, typeInt
+			if len(a) == 0 || len(a)%2 != 0 {
 				return nil, tengo.ErrWrongNumArguments
 			}
-			key, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			type specDef struct {
+				short    string
+				long     string
+				required bool
+				help     string
+				typeId   int
+				present  bool
 			}
-			val := os.Getenv(key)
-			if val == "" {
-				return tengo.UndefinedValue, nil
+			defs := make([]specDef, 0, len(a)/2)
+			for i := 0; i < len(a); i += 2 {
+				specS, ok := tengo.ToString(a[i])
+				if !ok {
+					return nil, tengo.ErrInvalidArgumentType{Name: "spec", Expected: "string", Found: a[i].TypeName()}
+				}
+				typeId, ok := tengo.ToInt(a[i+1])
+				if !ok {
+					return nil, tengo.ErrInvalidArgumentType{Name: "type", Expected: "int", Found: a[i+1].TypeName()}
+				}
+				parts := strings.SplitN(specS, ":", 4)
+				short := ""
+				long := ""
+				help := ""
+				if len(parts) > 0 {
+					short = parts[0]
+				}
+				if len(parts) > 1 {
+					long = parts[1]
+				}
+				if len(parts) > 3 {
+					help = parts[3]
+				}
+				req := false
+				if strings.HasPrefix(short, "_") {
+					req = true
+					short = strings.TrimPrefix(short, "_")
+				}
+				if strings.HasPrefix(long, "_") {
+					req = true
+					long = strings.TrimPrefix(long, "_")
+				}
+				defs = append(defs, specDef{short: short, long: long, required: req, help: help, typeId: int(typeId)})
 			}
-			return &tengo.String{Value: val}, nil
+
+			res := make(map[string]tengo.Object)
+			byShort := map[string]*specDef{}
+			byLong := map[string]*specDef{}
+			for i := range defs {
+				d := &defs[i]
+				if d.short != "" {
+					byShort[d.short] = d
+				}
+				if d.long != "" {
+					byLong[d.long] = d
+				}
+				if d.typeId == 0 {
+					if d.short != "" {
+						res[d.short] = tengo.FalseValue
+					}
+					if d.long != "" {
+						res[d.long] = tengo.FalseValue
+					}
+				}
+			}
+
+			// parse the current args slice
+			i := 0
+			for i < len(args) {
+				tok := args[i]
+				if strings.HasPrefix(tok, "--") {
+					nameVal := strings.TrimPrefix(tok, "--")
+					if strings.Contains(nameVal, "=") {
+						parts := strings.SplitN(nameVal, "=", 2)
+						name := parts[0]
+						val := parts[1]
+						if d, ok := byLong[name]; ok {
+							d.present = true
+							switch d.typeId {
+							case 0:
+								res[d.long] = tengo.TrueValue
+								if d.short != "" {
+									res[d.short] = tengo.TrueValue
+								}
+							case 1:
+								res[d.long] = &tengo.String{Value: val}
+								if d.short != "" {
+									res[d.short] = &tengo.String{Value: val}
+								}
+							case 2:
+								if v := parseInt(val); v == 0 && val != "0" {
+									return nil, fmt.Errorf("invalid integer for --%s: %s", name, val)
+								}
+								res[d.long] = &tengo.Int{Value: int64(parseInt(val))}
+								if d.short != "" {
+									res[d.short] = &tengo.Int{Value: int64(parseInt(val))}
+								}
+							}
+						}
+					} else {
+						name := nameVal
+						if d, ok := byLong[name]; ok {
+							d.present = true
+							switch d.typeId {
+							case 0:
+								res[d.long] = tengo.TrueValue
+								if d.short != "" {
+									res[d.short] = tengo.TrueValue
+								}
+							case 1:
+								if i+1 < len(args) {
+									val := args[i+1]
+									res[d.long] = &tengo.String{Value: val}
+									if d.short != "" {
+										res[d.short] = &tengo.String{Value: val}
+									}
+									i++
+								} else {
+									return nil, fmt.Errorf("missing value for --%s", name)
+								}
+							case 2:
+								if i+1 < len(args) {
+									val := args[i+1]
+									if v := parseInt(val); v == 0 && val != "0" {
+										return nil, fmt.Errorf("invalid integer for --%s: %s", name, val)
+									}
+									res[d.long] = &tengo.Int{Value: int64(parseInt(val))}
+									if d.short != "" {
+										res[d.short] = &tengo.Int{Value: int64(parseInt(val))}
+									}
+									i++
+								} else {
+									return nil, fmt.Errorf("missing value for --%s", name)
+								}
+							}
+						}
+					}
+				} else if strings.HasPrefix(tok, "-") && len(tok) >= 2 {
+					shorts := tok[1:]
+					if len(shorts) > 1 {
+						for j := 0; j < len(shorts); j++ {
+							sch := string(shorts[j])
+							if d, ok := byShort[sch]; ok {
+								d.present = true
+								switch d.typeId {
+								case 0:
+									res[d.short] = tengo.TrueValue
+									if d.long != "" {
+										res[d.long] = tengo.TrueValue
+									}
+								case 1:
+									val := shorts[j+1:]
+									if val == "" && i+1 < len(args) {
+										val = args[i+1]
+										i++
+									}
+									res[d.short] = &tengo.String{Value: val}
+									if d.long != "" {
+										res[d.long] = &tengo.String{Value: val}
+									}
+									break
+								case 2:
+									val := shorts[j+1:]
+									if val == "" && i+1 < len(args) {
+										val = args[i+1]
+										i++
+									}
+									if v := parseInt(val); v == 0 && val != "0" {
+										return nil, fmt.Errorf("invalid integer for -%s: %s", sch, val)
+									}
+									res[d.short] = &tengo.Int{Value: int64(parseInt(val))}
+									if d.long != "" {
+										res[d.long] = &tengo.Int{Value: int64(parseInt(val))}
+									}
+									break
+								}
+							}
+						}
+					} else {
+						sch := string(shorts[0])
+						if d, ok := byShort[sch]; ok {
+							d.present = true
+							switch d.typeId {
+							case 0:
+								res[d.short] = tengo.TrueValue
+								if d.long != "" {
+									res[d.long] = tengo.TrueValue
+								}
+							case 1:
+								if i+1 < len(args) {
+									val := args[i+1]
+									res[d.short] = &tengo.String{Value: val}
+									if d.long != "" {
+										res[d.long] = &tengo.String{Value: val}
+									}
+									i++
+								} else {
+									return nil, fmt.Errorf("missing value for -%s", sch)
+								}
+							case 2:
+								if i+1 < len(args) {
+									val := args[i+1]
+									if v := parseInt(val); v == 0 && val != "0" {
+										return nil, fmt.Errorf("invalid integer for -%s: %s", sch, val)
+									}
+									res[d.short] = &tengo.Int{Value: int64(parseInt(val))}
+									if d.long != "" {
+										res[d.long] = &tengo.Int{Value: int64(parseInt(val))}
+									}
+									i++
+								} else {
+									return nil, fmt.Errorf("missing value for -%s", sch)
+								}
+							}
+						}
+					}
+				} else {
+					// positional arg, stop parsing
+					break
+				}
+				i++
+			}
+
+			// capture remaining args and update global args/kush.args
+			remaining := []string{}
+			if i < len(args) {
+				remaining = args[i:]
+			}
+			// update top-level args object and kush.args
+			newArgsArr := toTengoArray(remaining)
+			argsArr.Value = newArgsArr.Value
+			kushMap.Value["args"] = newArgsArr
+
+			// If help requested or missing required, return an error with help text
+			helpLines := []string{}
+			for _, d := range defs {
+				helpLines = append(helpLines, fmt.Sprintf("-%s --%s\t%s\t%s", d.short, d.long, d.help, func() string {
+					if d.required {
+						return "(required)"
+					}
+					return ""
+				}()))
+			}
+			helpText := strings.Join(helpLines, "\n")
+
+			if h, ok := res["h"]; ok {
+				if hb, _ := tengo.ToBool(h); hb {
+					return nil, fmt.Errorf("%s", helpText)
+				}
+			}
+
+			for _, d := range defs {
+				if d.required && !d.present {
+					return nil, fmt.Errorf("%s", helpText)
+				}
+			}
+
+			return &tengo.Map{Value: res}, nil
 		},
 	})
 
@@ -202,7 +488,22 @@ func (e *Engine) run(code, filename string, args []string) error {
 
 	_, err := script.RunContext(context.Background())
 	if err != nil {
+		// If the script produced a help/usage-style error (multi-line with option
+		// markers), print the help text directly and don't treat it as a fatal
+		// error. This avoids the top-level log.Fatal from prefixing the message
+		// with a timestamp and "Runtime Error:" which looks noisy to users.
+		sMsg := err.Error()
+		if strings.Contains(sMsg, "\n") && strings.Contains(sMsg, "--") {
+			fmt.Println(sMsg)
+			return nil
+		}
 		return fmt.Errorf("%s: %w", filename, err)
 	}
 	return nil
+}
+
+func parseInt(s string) int {
+	var v int
+	fmt.Sscanf(s, "%d", &v)
+	return v
 }
