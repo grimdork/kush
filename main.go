@@ -16,7 +16,7 @@ import (
 var version = "dev"
 
 func main() {
-	opt := arg.New("kush", "kush shell")
+	opt := arg.New("kush")
 	if err := opt.SetFlag(arg.GroupDefault, "v", "version", "print version and exit"); err != nil {
 		log.Fatal(err)
 	}
