@@ -3,11 +3,13 @@ package builtins
 import (
 	"fmt"
 	"os"
-	"strings"
 	"strconv"
-	
+	"strings"
+
 	"github.com/grimdork/kush/internal/log"
 )
+
+func init() { Register("export", (*Builtins).handleExport) }
 
 // handleExport processes the export builtin. It preserves trailing spaces
 // and accepts single- or double-quoted values. Double-quoted values are

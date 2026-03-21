@@ -622,7 +622,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	// dig(host) -> array of IP strings
+	// dig(host) -> array of IP strings (deterministic: IPv4 addresses first)
 	_ = script.Add("dig", &tengo.UserFunction{
 		Name: "dig",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
@@ -633,12 +633,25 @@ func (e *Engine) run(code, filename string, args []string) error {
 			if !ok {
 				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
 			}
-			ips, err := net.LookupHost(host)
+			ips, err := net.LookupIP(host)
 			if err != nil {
 				return nil, nil
 			}
-			arr := make([]tengo.Object, len(ips))
-			for i, ip := range ips {
+			var v4s []string
+			var v6s []string
+			for _, ip := range ips {
+				if ip == nil {
+					continue
+				}
+				if ip.To4() != nil {
+					v4s = append(v4s, ip.String())
+				} else {
+					v6s = append(v6s, ip.String())
+				}
+			}
+			ordered := append(v4s, v6s...)
+			arr := make([]tengo.Object, len(ordered))
+			for i, ip := range ordered {
 				arr[i] = &tengo.String{Value: ip}
 			}
 			return &tengo.Array{Value: arr}, nil
