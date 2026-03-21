@@ -16,7 +16,8 @@ import (
 var version = "dev"
 
 func main() {
-	opt := arg.New("kush")
+	opt := arg.New("kush", "Kubernetes utility shell.")
+	opt.SetDefaultHelp(true)
 	if err := opt.SetFlag(arg.GroupDefault, "v", "version", "print version and exit"); err != nil {
 		log.Fatal(err)
 	}
@@ -65,11 +66,12 @@ func main() {
 		}
 		// If no extension, try running a blessed script by that name
 		if ext == "" {
-			if err := eng.RunBlessed(first, scriptArgs); err == nil {
+			err := eng.RunBlessed(first, scriptArgs)
+			if err == nil {
 				return
-			} else {
-				log.Fatal(err)
 			}
+
+			log.Fatal(err)
 		}
 	}
 
