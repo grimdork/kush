@@ -23,12 +23,19 @@ pr("http_post returned:", post)
 open := port_check("grimdork.net", 443)
 pr("port 443 open:", open)
 
-// Ping (may return latency or boolean)
+// Ping (returns latency in ms or -1 on failure)
 p := ping("grimdork.net")
-pr("ping result:", p)
+if p == -1 {
+    pr("ping failed")
+} else {
+    pr("ping latency (ms):", p)
+}
 
-// DNS lookup
+// DNS lookup - structured object with helpers
 d := dig("grimdork.net")
-pr("dig result:", d)
+pr("ipv4 first:", d.ipv4.first())
+pr("ipv4 all:", d.ipv4.all())
+pr("ipv6 first:", d.ipv6.first())
+pr("ipv6 all:", d.ipv6.all())
 
 pr("--- demo complete ---")
