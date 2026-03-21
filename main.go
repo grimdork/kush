@@ -1,13 +1,13 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/grimdork/climate/arg"
 	"github.com/grimdork/kush/internal/scripting"
 	"github.com/grimdork/kush/internal/shell"
 )
@@ -16,17 +16,28 @@ import (
 var version = "dev"
 
 func main() {
-	install := flag.Bool("install-scripts", false, "install bundled scripts into the user's blessed scripts directory (post-install)")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	shortV := flag.Bool("v", false, "print version and exit (shorthand)")
-	flag.Parse()
+	opt := arg.New("kush", "kush shell")
+	if err := opt.SetFlag(arg.GroupDefault, "v", "version", "print version and exit"); err != nil {
+		log.Fatal(err)
+	}
+	// No short flag for install-scripts
+	if err := opt.SetFlag(arg.GroupDefault, "", "install-scripts", "install bundled scripts into the user's blessed scripts directory (post-install)"); err != nil {
+		log.Fatal(err)
+	}
 
-	if *showVersion || *shortV {
+	if err := opt.Parse(os.Args[1:]); err != nil {
+		// If there were no args, continue to interactive shell.
+		if err != arg.ErrNoArgs {
+			log.Fatal(err)
+		}
+	}
+
+	if opt.GetBool("version") || opt.GetBool("v") {
 		fmt.Println(version)
 		return
 	}
 
-	if *install {
+	if opt.GetBool("install-scripts") {
 		eng := scripting.New(nil)
 		target := eng.BlessedDir()
 		if err := installBundledScripts(target); err != nil {
@@ -37,14 +48,14 @@ func main() {
 	}
 
 	// If invoked as: kush <script.tengo|.t|<blessed-name>> [args...], run the script and exit.
-	if flag.NArg() > 0 {
-		first := flag.Arg(0)
+	if len(opt.Args) > 0 {
+		first := opt.Args[0]
 		ext := filepath.Ext(first)
 		eng := scripting.New(nil)
 		// remaining args are passed to the script (program name stripped)
 		scriptArgs := []string{}
-		if flag.NArg() > 1 {
-			scriptArgs = flag.Args()[1:]
+		if len(opt.Args) > 1 {
+			scriptArgs = opt.Args[1:]
 		}
 		if ext == ".t" || ext == ".tengo" {
 			if err := eng.RunFile(first, scriptArgs); err != nil {
