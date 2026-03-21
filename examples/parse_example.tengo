@@ -1,3 +1,4 @@
+#!/usr/bin/env kush
 // parse_example.tengo -- example showing parseKeywords usage
 
 println("Initial kush.args:", kush.args)
