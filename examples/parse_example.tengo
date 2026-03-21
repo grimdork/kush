@@ -1,5 +1,3 @@
-#!/usr/bin/env tengo
-
 // parse_example.tengo -- example showing parseKeywords usage
 
 println("Initial kush.args:", kush.args)
@@ -23,9 +21,9 @@ if p.h == true {
 println("Remaining positional args:", kush.args)
 
 // demonstrate typed access
-if p.H != nil {
+if p.H != undefined {
 	println("Host:", p.H)
 }
-if p.num != nil {
+if p.num != undefined {
 	println("Num:", p.num)
 }
