@@ -585,6 +585,66 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
+	// print (no trailing newline)
+	_ = script.Add("print", &tengo.UserFunction{
+		Name: "print",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			parts := make([]any, len(a))
+			for i, obj := range a {
+				s, _ := tengo.ToString(obj)
+				parts[i] = s
+			}
+			fmt.Print(parts...)
+			return tengo.UndefinedValue, nil
+		},
+	})
+
+	// ping(host) -> int ms (simple TCP connect to port 80). Returns -1 on failure.
+	_ = script.Add("ping", &tengo.UserFunction{
+		Name: "ping",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			host, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
+			}
+			addr := net.JoinHostPort(host, "80")
+			start := time.Now()
+			conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err != nil {
+				return &tengo.Int{Value: -1}, nil
+			}
+			_ = conn.Close()
+			ms := time.Since(start).Milliseconds()
+			return &tengo.Int{Value: int64(ms)}, nil
+		},
+	})
+
+	// dig(host) -> array of IP strings
+	_ = script.Add("dig", &tengo.UserFunction{
+		Name: "dig",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			host, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
+			}
+			ips, err := net.LookupHost(host)
+			if err != nil {
+				return nil, nil
+			}
+			arr := make([]tengo.Object, len(ips))
+			for i, ip := range ips {
+				arr[i] = &tengo.String{Value: ip}
+			}
+			return &tengo.Array{Value: arr}, nil
+		},
+	})
+
 	// HTTP functions available to scripts
 	_ = script.Add("http_get", &tengo.UserFunction{
 		Name:  "http_get",
