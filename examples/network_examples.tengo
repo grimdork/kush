@@ -2,7 +2,7 @@
 // network_examples.tengo -- Demonstrate scripting builtins for networking
 
 // Note: This script exercises the built-in helpers exposed to Tengo scripts in kush:
-// getenv, setenv, pr, printf, http_get, http_post, port_check, ping, dig
+// getenv, setenv, pr, printf, httpget, httppost, checkport, ping, dig
 
 pr("--- Network builtins demo ---")
 
@@ -12,15 +12,15 @@ setenv("KUSH_TEST", "network-demo")
 pr("KUSH_TEST after:", getenv("KUSH_TEST"))
 
 // HTTP GET
-resp := http_get("https://grimdork.net")
+resp := httpget("https://grimdork.net")
 pr("http_get returned:", resp)
 
 // HTTP POST (simple form)
-post := http_post("https://grimdork.net/form", "field=value")
+post := httppost("https://grimdork.net/form", "field=value")
 pr("http_post returned:", post)
 
 // Port check
-open := port_check("grimdork.net", 443)
+open := checkport("grimdork.net", 443)
 pr("port 443 open:", open)
 
 // Ping (returns latency in ms or -1 on failure)
