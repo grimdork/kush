@@ -59,20 +59,15 @@ func main() {
 	if fn != "" {
 		ext := filepath.Ext(fn)
 		eng := scripting.New(nil)
-		// remaining args are passed to the script (program name stripped)
-		scriptArgs := []string{}
-		if len(opt.Args) > 1 {
-			scriptArgs = opt.Args[1:]
-		}
 		if ext == ".t" || ext == ".tengo" {
-			if err := eng.RunFile(fn, scriptArgs); err != nil {
+			if err := eng.RunFile(fn, opt.Args); err != nil {
 				log.Fatal(err)
 			}
 			return
 		}
 		// If no extension, try running a blessed script by that name
 		if ext == "" {
-			err := eng.RunBlessed(fn, scriptArgs)
+			err := eng.RunBlessed(fn, opt.Args)
 			if err == nil {
 				return
 			}
