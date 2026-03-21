@@ -72,10 +72,11 @@ func (p *Provider) Get() string {
 }
 
 // expandPrompt replaces tokens in the raw prompt string. Supported tokens:
-//  - %% -> literal %
-//  - %T, %t, %H, %h, %m, %s, %p, %P
-//  - [cmd] -> execute external command via sh -c (allowed only when allowExternal=true)
-//  - {script} -> execute a local script file (if executable) via sh -c
+//   - %% -> literal %
+//   - %T, %t, %H, %h, %m, %s, %p, %P
+//   - [cmd] -> execute external command via sh -c (allowed only when allowExternal=true)
+//   - {script} -> execute a local script file (if executable) via sh -c
+//
 // Backslash can escape special chars: \[ \{ \% \\
 func expandPrompt(ctx context.Context, raw string, allowExternal bool) string {
 	var out bytes.Buffer

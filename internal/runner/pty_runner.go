@@ -35,5 +35,3 @@ func saveAndSetPassthrough(fd int) (unix.Termios, error) {
 func restoreTermios(fd int, t unix.Termios) error {
 	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
 }
-
-

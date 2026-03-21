@@ -167,7 +167,6 @@ func RunShell(line string) error {
 	return err
 }
 
-
 func runPlain(line string) error {
 	stdinFd := int(os.Stdin.Fd())
 	if p, err := unix.IoctlGetTermios(stdinFd, unix.TIOCGETA); err == nil && p != nil {
@@ -211,4 +210,3 @@ func saveAndSetPassthrough(fd int) (unix.Termios, error) {
 func restoreTermios(fd int, t unix.Termios) error {
 	return unix.IoctlSetTermios(fd, unix.TIOCSETA, &t)
 }
-

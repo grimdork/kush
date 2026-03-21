@@ -25,12 +25,12 @@ func (ed *Editor) historyViewer(reader *bufio.Reader) string {
 	const (
 		reset   = "\x1b[0m"
 		titleBg = "\x1b[48;5;24m\x1b[97m"  // deep blue bg, white text
-		selBg   = "\x1b[48;5;237m\x1b[97m"  // dark grey bg, white text
-		searchC = "\x1b[48;5;22m\x1b[97m"   // dark green bg, white text
-		statusC = "\x1b[48;5;238m\x1b[37m"  // grey bg, light text
-		dimC    = "\x1b[38;5;243m"           // dim grey for non-selected items
-		matchC  = "\x1b[33m"                 // yellow for search matches
-		idxC    = "\x1b[38;5;243m"           // dim for line numbers
+		selBg   = "\x1b[48;5;237m\x1b[97m" // dark grey bg, white text
+		searchC = "\x1b[48;5;22m\x1b[97m"  // dark green bg, white text
+		statusC = "\x1b[48;5;238m\x1b[37m" // grey bg, light text
+		dimC    = "\x1b[38;5;243m"         // dim grey for non-selected items
+		matchC  = "\x1b[33m"               // yellow for search matches
+		idxC    = "\x1b[38;5;243m"         // dim for line numbers
 	)
 
 	// State

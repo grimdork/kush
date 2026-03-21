@@ -2,8 +2,8 @@ package builtins
 
 import (
 	"fmt"
-	"strings"
 	"os/exec"
+	"strings"
 
 	"github.com/grimdork/kush/internal/log"
 )
