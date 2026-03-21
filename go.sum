@@ -1,6 +1,6 @@
 github.com/d5/tengo/v2 v2.17.0 h1:BWUN9NoJzw48jZKiYDXDIF3QrIVZRm1uV1gTzeZ2lqM=
 github.com/d5/tengo/v2 v2.17.0/go.mod h1:XRGjEs5I9jYIKTxly6HCF8oiiilk5E/RYXOZ5b0DZC8=
-github.com/grimdork/climate v0.24.6 h1:r9m0JfPFuhyTVrQFYL67bFvQ4ZKwRJIK+E0lRiGd/ts=
-github.com/grimdork/climate v0.24.6/go.mod h1:TK3a+IoyW2sab2UY/3nwl34KYewdxaxuDNXM2g3gbwY=
+github.com/grimdork/climate v0.25.0 h1:H22s8paMoOzW1y3Iw9wlVA2AMetyfNN9gy7cc7K5TeA=
+github.com/grimdork/climate v0.25.0/go.mod h1:TK3a+IoyW2sab2UY/3nwl34KYewdxaxuDNXM2g3gbwY=
 golang.org/x/sys v0.42.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=
 golang.org/x/sys v0.42.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
