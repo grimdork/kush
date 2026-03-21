@@ -1,0 +1,31 @@
+#!/usr/bin/env tengo
+
+// parse_example.tengo -- example showing parseKeywords usage
+
+println("Initial kush.args:", kush.args)
+
+// define expected keywords: short:long:unused:help
+// h:help -> flag
+// _H:host -> required string (leading underscore marks required)
+// n:num -> optional integer
+p := parseKeywords("h:help::Show help.", FLAG, "_H:host::Hostname to contact", STRING, "n:num::Count", INT)
+
+println("parse result:")
+println(p)
+
+if p.h == true {
+	println("Help requested")
+	// in this runner parseKeywords returns an error instead of exiting;
+	// callers can handle it. We just show behavior here.
+}
+
+// kush.args is updated to remaining positional args
+println("Remaining positional args:", kush.args)
+
+// demonstrate typed access
+if p.H != nil {
+	println("Host:", p.H)
+}
+if p.num != nil {
+	println("Num:", p.num)
+}
