@@ -102,6 +102,11 @@ func (e *Engine) run(code, filename string, args []string) error {
 		}
 	}
 
+	// Debug: show the start of the script (helpful when diagnosing shebang/parse issues)
+	// NOTE: left in temporarily to verify shebang handling.
+	if len(code) > 0 {
+		// intentionally quiet here; don't print script contents in normal runs
+	}
 	script := tengo.NewScript([]byte(code))
 
 	// Add standard library modules
@@ -143,7 +148,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 				long     string
 				required bool
 				help     string
-				typeId   int
+				typeID   int
 				present  bool
 			}
 			defs := make([]specDef, 0, len(a)/2)
@@ -152,7 +157,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 				if !ok {
 					return nil, tengo.ErrInvalidArgumentType{Name: "spec", Expected: "string", Found: a[i].TypeName()}
 				}
-				typeId, ok := tengo.ToInt(a[i+1])
+				typeID, ok := tengo.ToInt(a[i+1])
 				if !ok {
 					return nil, tengo.ErrInvalidArgumentType{Name: "type", Expected: "int", Found: a[i+1].TypeName()}
 				}
@@ -178,7 +183,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 					req = true
 					long = strings.TrimPrefix(long, "_")
 				}
-				defs = append(defs, specDef{short: short, long: long, required: req, help: help, typeId: int(typeId)})
+				defs = append(defs, specDef{short: short, long: long, required: req, help: help, typeID: int(typeID)})
 			}
 
 			res := make(map[string]tengo.Object)
@@ -192,7 +197,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 				if d.long != "" {
 					byLong[d.long] = d
 				}
-				if d.typeId == 0 {
+				if d.typeID == 0 {
 					if d.short != "" {
 						res[d.short] = tengo.FalseValue
 					}
@@ -214,7 +219,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 						val := parts[1]
 						if d, ok := byLong[name]; ok {
 							d.present = true
-							switch d.typeId {
+							switch d.typeID {
 							case 0:
 								res[d.long] = tengo.TrueValue
 								if d.short != "" {
@@ -239,7 +244,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 						name := nameVal
 						if d, ok := byLong[name]; ok {
 							d.present = true
-							switch d.typeId {
+							switch d.typeID {
 							case 0:
 								res[d.long] = tengo.TrueValue
 								if d.short != "" {
@@ -280,12 +285,13 @@ func (e *Engine) run(code, filename string, args []string) error {
 							sch := string(shorts[j])
 							if d, ok := byShort[sch]; ok {
 								d.present = true
-								switch d.typeId {
+								switch d.typeID {
 								case 0:
 									res[d.short] = tengo.TrueValue
 									if d.long != "" {
 										res[d.long] = tengo.TrueValue
 									}
+
 								case 1:
 									val := shorts[j+1:]
 									if val == "" && i+1 < len(args) {
@@ -296,7 +302,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 									if d.long != "" {
 										res[d.long] = &tengo.String{Value: val}
 									}
-									break
+
 								case 2:
 									val := shorts[j+1:]
 									if val == "" && i+1 < len(args) {
@@ -310,7 +316,6 @@ func (e *Engine) run(code, filename string, args []string) error {
 									if d.long != "" {
 										res[d.long] = &tengo.Int{Value: int64(parseInt(val))}
 									}
-									break
 								}
 							}
 						}
@@ -318,7 +323,7 @@ func (e *Engine) run(code, filename string, args []string) error {
 						sch := string(shorts[0])
 						if d, ok := byShort[sch]; ok {
 							d.present = true
-							switch d.typeId {
+							switch d.typeID {
 							case 0:
 								res[d.short] = tengo.TrueValue
 								if d.long != "" {
@@ -488,13 +493,21 @@ func (e *Engine) run(code, filename string, args []string) error {
 
 	_, err := script.RunContext(context.Background())
 	if err != nil {
+			sMsg := err.Error()
 		// If the script produced a help/usage-style error (multi-line with option
 		// markers), print the help text directly and don't treat it as a fatal
 		// error. This avoids the top-level log.Fatal from prefixing the message
-		// with a timestamp and "Runtime Error:" which looks noisy to users.
-		sMsg := err.Error()
-		if strings.Contains(sMsg, "\n") && strings.Contains(sMsg, "--") {
-			fmt.Println(sMsg)
+		// with a timestamp which looks noisy to users.
+		sMsgLower := strings.ToLower(sMsg)
+		if strings.Contains(sMsg, "--") || strings.Contains(sMsgLower, "show help") || strings.Contains(sMsgLower, "--help") {
+			// Strip the "Runtime Error:" prefix and any trailing location stack
+			// ("\n\tat ...") so the output is just the help text.
+			clean := sMsg
+			if idx := strings.Index(clean, "\n\tat "); idx >= 0 {
+				clean = clean[:idx]
+			}
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "Runtime Error:"))
+			fmt.Println(clean)
 			return nil
 		}
 		return fmt.Errorf("%s: %w", filename, err)
