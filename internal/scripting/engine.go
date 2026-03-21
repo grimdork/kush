@@ -405,43 +405,6 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	_ = script.Add("env_get", &tengo.UserFunction{
-		Name: "env_get",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 1 {
-				return nil, tengo.ErrWrongNumArguments
-			}
-			key, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
-			}
-			val := os.Getenv(key)
-			return &tengo.String{Value: val}, nil
-		},
-	})
-
-	_ = script.Add("env_set", &tengo.UserFunction{
-		Name: "env_set",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 2 {
-				return nil, tengo.ErrWrongNumArguments
-			}
-			key, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
-			}
-			val, ok := tengo.ToString(a[1])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "value", Expected: "string", Found: a[1].TypeName()}
-			}
-			os.Setenv(key, val)
-			if e.pp != nil {
-				e.pp.Invalidate()
-			}
-			return tengo.UndefinedValue, nil
-		},
-	})
-
 	_ = script.Add("cwd", &tengo.UserFunction{
 		Name: "cwd",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
@@ -450,32 +413,6 @@ func (e *Engine) run(code, filename string, args []string) error {
 				return &tengo.String{Value: ""}, nil
 			}
 			return &tengo.String{Value: dir}, nil
-		},
-	})
-
-	_ = script.Add("print", &tengo.UserFunction{
-		Name: "print",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			parts := make([]any, len(a))
-			for i, obj := range a {
-				s, _ := tengo.ToString(obj)
-				parts[i] = s
-			}
-			fmt.Print(parts...)
-			return tengo.UndefinedValue, nil
-		},
-	})
-
-	_ = script.Add("println", &tengo.UserFunction{
-		Name: "println",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			parts := make([]any, len(a))
-			for i, obj := range a {
-				s, _ := tengo.ToString(obj)
-				parts[i] = s
-			}
-			fmt.Println(parts...)
-			return tengo.UndefinedValue, nil
 		},
 	})
 

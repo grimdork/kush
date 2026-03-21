@@ -138,8 +138,8 @@ var helpTopics = map[string]string{
   the blessed script directory (%bold$KUSH_SCRIPTS%reset or %bold~/.kush/scripts/%reset)
   is checked first.
 
-  Scripts have access to: %cyanargs%reset, %cyanenv_get%reset, %cyanenv_set%reset, %cyancwd%reset,
-  %cyanprint%reset, %cyanprintln%reset, %cyanprintf%reset, %cyanhttp_get%reset, %cyanhttp_post%reset,
+  Scripts have access to: %cyanargs%reset, %cyangetenv%reset, %cyansetenv%reset, %cyancwd%reset,
+  %cyanpr%reset, %cyanprintf%reset, %cyanhttp_get%reset, %cyanhttp_post%reset, %cyanport_check%reset,
   plus the Tengo standard library.
 
   %grey Examples:%reset
@@ -154,7 +154,6 @@ var helpTopics = map[string]string{
     %cyaneval%reset 'println("hello")'
     %cyaneval%reset 'printf("%%d\n", 2 + 2)'`,
 }
-
 
 // printHelp handles the "help" builtin. Returns true if it was handled.
 func printHelp(args []string) {
