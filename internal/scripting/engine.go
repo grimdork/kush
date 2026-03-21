@@ -4,9 +4,12 @@ package scripting
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/d5/tengo/v2"
 	"github.com/d5/tengo/v2/stdlib"
@@ -493,6 +496,133 @@ func (e *Engine) run(code, filename string, args []string) error {
 			}
 			fmt.Printf(format, fmtArgs...)
 			return tengo.UndefinedValue, nil
+		},
+	})
+
+	// Handy aliases and small network helpers
+	_ = script.Add("getenv", &tengo.UserFunction{
+		Name: "getenv",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val := os.Getenv(key)
+			return &tengo.String{Value: val}, nil
+		},
+	})
+
+	_ = script.Add("setenv", &tengo.UserFunction{
+		Name: "setenv",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 2 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val, ok := tengo.ToString(a[1])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "value", Expected: "string", Found: a[1].TypeName()}
+			}
+			os.Setenv(key, val)
+			if e.pp != nil {
+				e.pp.Invalidate()
+			}
+			return tengo.UndefinedValue, nil
+		},
+	})
+
+	_ = script.Add("pr", &tengo.UserFunction{
+		Name: "pr",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			parts := make([]any, len(a))
+			for i, obj := range a {
+				s, _ := tengo.ToString(obj)
+				parts[i] = s
+			}
+			fmt.Println(parts...)
+			return tengo.UndefinedValue, nil
+		},
+	})
+
+	// Basic TCP port check: port_check(host, port) -> bool
+	_ = script.Add("port_check", &tengo.UserFunction{
+		Name: "port_check",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 2 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			host, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
+			}
+			var portStr string
+			if s, ok := tengo.ToString(a[1]); ok {
+				portStr = s
+			} else if i, ok := tengo.ToInt(a[1]); ok {
+				portStr = strconv.Itoa(int(i))
+			} else {
+				return nil, tengo.ErrInvalidArgumentType{Name: "port", Expected: "string|int", Found: a[1].TypeName()}
+			}
+			addr := net.JoinHostPort(host, portStr)
+			timeout := 2 * time.Second
+			conn, err := net.DialTimeout("tcp", addr, timeout)
+			if err != nil {
+				return tengo.FalseValue, nil
+			}
+			_ = conn.Close()
+			return tengo.TrueValue, nil
+		},
+	})
+
+	// alias style names for convenience
+	_ = script.Add("env_get", &tengo.UserFunction{
+		Name: "env_get",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val := os.Getenv(key)
+			return &tengo.String{Value: val}, nil
+		},
+	})
+
+	_ = script.Add("env_set", &tengo.UserFunction{
+		Name: "env_set",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 2 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val, ok := tengo.ToString(a[1])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "value", Expected: "string", Found: a[1].TypeName()}
+			}
+			os.Setenv(key, val)
+			if e.pp != nil {
+				e.pp.Invalidate()
+			}
+			return tengo.UndefinedValue, nil
+		},
+	})
+
+	// alias for port_check
+	_ = script.Add("checkport", &tengo.UserFunction{
+		Name: "checkport",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			return script.Objects["port_check"].(*tengo.UserFunction).Value(a...)
 		},
 	})
 
