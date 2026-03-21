@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -487,75 +488,10 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	// Basic TCP port check: port_check(host, port) -> bool
-	_ = script.Add("port_check", &tengo.UserFunction{
-		Name: "port_check",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 2 {
-				return nil, tengo.ErrWrongNumArguments
-			}
-			host, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "host", Expected: "string", Found: a[0].TypeName()}
-			}
-			var portStr string
-			if s, ok := tengo.ToString(a[1]); ok {
-				portStr = s
-			} else if i, ok := tengo.ToInt(a[1]); ok {
-				portStr = strconv.Itoa(int(i))
-			} else {
-				return nil, tengo.ErrInvalidArgumentType{Name: "port", Expected: "string|int", Found: a[1].TypeName()}
-			}
-			addr := net.JoinHostPort(host, portStr)
-			timeout := 2 * time.Second
-			conn, err := net.DialTimeout("tcp", addr, timeout)
-			if err != nil {
-				return tengo.FalseValue, nil
-			}
-			_ = conn.Close()
-			return tengo.TrueValue, nil
-		},
-	})
+	// alias style names for convenience - keep short names, avoid underscored variants
+	// Note: getenv/setenv and checkport are the preferred names.
 
-	// alias style names for convenience
-	_ = script.Add("env_get", &tengo.UserFunction{
-		Name: "env_get",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 1 {
-				return nil, tengo.ErrWrongNumArguments
-			}
-			key, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
-			}
-			val := os.Getenv(key)
-			return &tengo.String{Value: val}, nil
-		},
-	})
-
-	_ = script.Add("env_set", &tengo.UserFunction{
-		Name: "env_set",
-		Value: func(a ...tengo.Object) (tengo.Object, error) {
-			if len(a) < 2 {
-				return nil, tengo.ErrWrongNumArguments
-			}
-			key, ok := tengo.ToString(a[0])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
-			}
-			val, ok := tengo.ToString(a[1])
-			if !ok {
-				return nil, tengo.ErrInvalidArgumentType{Name: "value", Expected: "string", Found: a[1].TypeName()}
-			}
-			os.Setenv(key, val)
-			if e.pp != nil {
-				e.pp.Invalidate()
-			}
-			return tengo.UndefinedValue, nil
-		},
-	})
-
-	// alias for port_check (duplicate implementation to avoid referencing script internals)
+	// alias for port_check behaviour (checkport kept as the canonical name)
 	_ = script.Add("checkport", &tengo.UserFunction{
 		Name: "checkport",
 		Value: func(a ...tengo.Object) (tengo.Object, error) {
@@ -582,6 +518,44 @@ func (e *Engine) run(code, filename string, args []string) error {
 			}
 			_ = conn.Close()
 			return tengo.TrueValue, nil
+		},
+	})
+
+	// expose only the short env helpers
+	_ = script.Add("getenv", &tengo.UserFunction{
+		Name: "getenv",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val := os.Getenv(key)
+			return &tengo.String{Value: val}, nil
+		},
+	})
+
+	_ = script.Add("setenv", &tengo.UserFunction{
+		Name: "setenv",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 2 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			key, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "key", Expected: "string", Found: a[0].TypeName()}
+			}
+			val, ok := tengo.ToString(a[1])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "value", Expected: "string", Found: a[1].TypeName()}
+			}
+			os.Setenv(key, val)
+			if e.pp != nil {
+				e.pp.Invalidate()
+			}
+			return tengo.UndefinedValue, nil
 		},
 	})
 
@@ -697,13 +671,13 @@ func (e *Engine) run(code, filename string, args []string) error {
 		},
 	})
 
-	// HTTP functions available to scripts
-	_ = script.Add("http_get", &tengo.UserFunction{
-		Name:  "http_get",
+	// HTTP functions available to scripts (no underscores)
+	_ = script.Add("httpget", &tengo.UserFunction{
+		Name:  "httpget",
 		Value: httpGetFunc,
 	})
-	_ = script.Add("http_post", &tengo.UserFunction{
-		Name:  "http_post",
+	_ = script.Add("httppost", &tengo.UserFunction{
+		Name:  "httppost",
 		Value: httpPostFunc,
 	})
 
