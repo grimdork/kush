@@ -21,14 +21,20 @@ func main() {
 	if err := opt.SetFlag(arg.GroupDefault, "v", "version", "print version and exit"); err != nil {
 		log.Fatal(err)
 	}
+
 	// No short flag for install-scripts
 	if err := opt.SetFlag(arg.GroupDefault, "", "install-scripts", "install bundled scripts into the user's blessed scripts directory (post-install)"); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := opt.Parse(os.Args[1:]); err != nil {
+	err := opt.SetPositional("SCRIPT", "Optional script to run instead of interactive shell.", "", false, arg.VarString)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err = opt.Parse(os.Args[1:]); err != nil {
 		// If there were no args, continue to interactive shell.
-		if err != arg.ErrNoArgs {
+		if err != arg.ErrNonFatal {
 			log.Fatal(err)
 		}
 	}
@@ -49,9 +55,9 @@ func main() {
 	}
 
 	// If invoked as: kush <script.tengo|.t|<blessed-name>> [args...], run the script and exit.
-	if len(opt.Args) > 0 {
-		first := opt.Args[0]
-		ext := filepath.Ext(first)
+	fn := opt.GetPosString("SCRIPT")
+	if fn != "" {
+		ext := filepath.Ext(fn)
 		eng := scripting.New(nil)
 		// remaining args are passed to the script (program name stripped)
 		scriptArgs := []string{}
@@ -59,14 +65,14 @@ func main() {
 			scriptArgs = opt.Args[1:]
 		}
 		if ext == ".t" || ext == ".tengo" {
-			if err := eng.RunFile(first, scriptArgs); err != nil {
+			if err := eng.RunFile(fn, scriptArgs); err != nil {
 				log.Fatal(err)
 			}
 			return
 		}
 		// If no extension, try running a blessed script by that name
 		if ext == "" {
-			err := eng.RunBlessed(first, scriptArgs)
+			err := eng.RunBlessed(fn, scriptArgs)
 			if err == nil {
 				return
 			}
