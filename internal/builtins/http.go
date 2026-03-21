@@ -9,12 +9,12 @@ import (
 )
 
 func init() {
-	Register("get", (*Builtins).handleGet)
-	Register("post", (*Builtins).handlePost)
-	Register("put", (*Builtins).handlePut)
-	Register("delete", (*Builtins).handleDelete)
-	Register("head", (*Builtins).handleHead)
-	Register("fetch", (*Builtins).handleFetch)
+	Register("get", handleGet)
+	Register("post", handlePost)
+	Register("put", handlePut)
+	Register("delete", handleDelete)
+	Register("head", handleHead)
+	Register("fetch", handleFetch)
 }
 
 // parseHTTPArgs extracts flags from an HTTP command line.
@@ -53,7 +53,7 @@ func parseHTTPArgs(line string) (url string, headers map[string]string, jsonPret
 	return
 }
 
-func (b *Builtins) handleGet(line string) bool {
+func handleGet(b *Builtins, line string) bool {
 	url, headers, jsonPretty, _ := parseHTTPArgs(line)
 	if url == "" {
 		fmt.Fprintln(os.Stderr, "usage: get [-j] [-H \"Key: Value\"] <url>")
@@ -78,7 +78,7 @@ func (b *Builtins) handleGet(line string) bool {
 	return true
 }
 
-func (b *Builtins) handlePost(line string) bool {
+func handlePost(b *Builtins, line string) bool {
 	url, headers, jsonPretty, rest := parseHTTPArgs(line)
 	if url == "" {
 		fmt.Fprintln(os.Stderr, "usage: post [-j] [-H \"Key: Value\"] <url> [body]")
@@ -114,7 +114,7 @@ func (b *Builtins) handlePost(line string) bool {
 	return true
 }
 
-func (b *Builtins) handlePut(line string) bool {
+func handlePut(b *Builtins, line string) bool {
 	url, headers, jsonPretty, rest := parseHTTPArgs(line)
 	if url == "" {
 		fmt.Fprintln(os.Stderr, "usage: put [-j] [-H \"Key: Value\"] <url> [body]")
@@ -149,7 +149,7 @@ func (b *Builtins) handlePut(line string) bool {
 	return true
 }
 
-func (b *Builtins) handleDelete(line string) bool {
+func handleDelete(b *Builtins, line string) bool {
 	url, headers, jsonPretty, _ := parseHTTPArgs(line)
 	if url == "" {
 		fmt.Fprintln(os.Stderr, "usage: delete [-j] [-H \"Key: Value\"] <url>")
@@ -173,7 +173,7 @@ func (b *Builtins) handleDelete(line string) bool {
 	return true
 }
 
-func (b *Builtins) handleHead(line string) bool {
+func handleHead(b *Builtins, line string) bool {
 	url, headers, _, _ := parseHTTPArgs(line)
 	if url == "" {
 		fmt.Fprintln(os.Stderr, "usage: head [-H \"Key: Value\"] <url>")
@@ -191,7 +191,7 @@ func (b *Builtins) handleHead(line string) bool {
 	return true
 }
 
-func (b *Builtins) handleFetch(line string) bool {
+func handleFetch(b *Builtins, line string) bool {
 	tokens := shellSplit(line)
 	if len(tokens) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: fetch [-o outfile] <url>")
