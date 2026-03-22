@@ -35,9 +35,6 @@ builds:
     goarch:
       - arm64
 
-release:
-  prerelease: true
-
 archives:
   - wrap_in_directory: true
     files:
