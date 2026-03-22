@@ -6,14 +6,14 @@ package runner
 import (
 	"fmt"
 
-	"golang.org/x/sys/unix"
+	"github.com/creack/pty"
 )
 
-// BSD implementation using unix.Openpty when available (not for darwin).
+// BSD implementation using creack/pty for portability.
 func openpty() (masterFD, slaveFD int, err error) {
-	m, s, err := unix.Openpty(nil, nil)
+	m, s, err := pty.Open()
 	if err != nil {
 		return 0, 0, fmt.Errorf("openpty failed: %w", err)
 	}
-	return m, s, nil
+	return int(m.Fd()), int(s.Fd()), nil
 }

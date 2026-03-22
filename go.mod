@@ -7,4 +7,7 @@ require (
 	golang.org/x/sys v0.42.0
 )
 
-require github.com/d5/tengo/v2 v2.17.0
+require (
+	github.com/creack/pty v1.1.24
+	github.com/d5/tengo/v2 v2.17.0
+)
