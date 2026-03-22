@@ -10,12 +10,13 @@
 BINARY=kush
 DIST_DIR=dist
 VERSION?=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+FLAGS=-ldflags="-s -w -X main.version=$(VERSION)"
 
 .PHONY: all build build-cross dist clean package-brew brew-formula release-draft
 all: build
 
 build:
-	go build -o $(BINARY) ./
+	go build -trimpath $(FLAGS) -o $(BINARY) ./
 
 build-cross:
 	@mkdir -p $(DIST_DIR)
