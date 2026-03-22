@@ -11,9 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/d5/tengo/v2"
 	"github.com/d5/tengo/v2/stdlib"
+	"github.com/grimdork/kush/internal/base"
 	"github.com/grimdork/kush/internal/prompt"
 )
 
@@ -668,6 +670,156 @@ func (e *Engine) run(code, filename string, args []string) error {
 				"ipv6": &tengo.Map{Value: ipv6Map},
 			}}
 			return res, nil
+		},
+	})
+
+	// ---- New helpers from github.com/grimdork/base and simple loaders ----
+	_ = script.Add("encode64", &tengo.UserFunction{
+		Name: "encode64",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "s", Expected: "string", Found: a[0].TypeName()}
+			}
+			return &tengo.String{Value: string(base.EncodeBase64(s))}, nil
+		},
+	})
+
+	_ = script.Add("encode64url", &tengo.UserFunction{
+		Name: "encode64url",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "s", Expected: "string", Found: a[0].TypeName()}
+			}
+			return &tengo.String{Value: string(base.EncodeBase64URL(s))}, nil
+		},
+	})
+
+	_ = script.Add("decode64", &tengo.UserFunction{
+		Name: "decode64",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "s", Expected: "string", Found: a[0].TypeName()}
+			}
+			b := base.DecodeBase64([]byte(s))
+			if b == nil {
+				return &tengo.String{Value: ""}, nil
+			}
+			return &tengo.String{Value: string(b)}, nil
+		},
+	})
+
+	_ = script.Add("decode64url", &tengo.UserFunction{
+		Name: "decode64url",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "s", Expected: "string", Found: a[0].TypeName()}
+			}
+			b := base.DecodeBase64URL([]byte(s))
+			if b == nil {
+				return &tengo.String{Value: ""}, nil
+			}
+			return &tengo.String{Value: string(b)}, nil
+		},
+	})
+
+	_ = script.Add("encoden", &tengo.UserFunction{
+		Name: "encoden",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "id", Expected: "string", Found: a[0].TypeName()}
+			}
+			id, err := strconv.ParseUint(s, 10, 64)
+			if err != nil {
+				return &tengo.String{Value: ""}, nil
+			}
+			sz := 64
+			if len(a) >= 2 {
+				if v, ok := tengo.ToInt(a[1]); ok {
+					sz = v
+				}
+			}
+			res := base.NumEncode(uint64(id), sz)
+			return &tengo.String{Value: res}, nil
+		},
+	})
+
+	_ = script.Add("decoden", &tengo.UserFunction{
+		Name: "decoden",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			s, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "s", Expected: "string", Found: a[0].TypeName()}
+			}
+			sz := 64
+			if len(a) >= 2 {
+				if v, ok := tengo.ToInt(a[1]); ok {
+					sz = v
+				}
+			}
+			v := base.NumDecode(s, sz)
+			return &tengo.String{Value: strconv.FormatUint(uint64(v), 10)}, nil
+		},
+	})
+
+	_ = script.Add("loadfile", &tengo.UserFunction{
+		Name: "loadfile",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			p, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "path", Expected: "string", Found: a[0].TypeName()}
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return &tengo.String{Value: ""}, nil
+			}
+			return &tengo.String{Value: string(b)}, nil
+		},
+	})
+
+	_ = script.Add("loadtext", &tengo.UserFunction{
+		Name: "loadtext",
+		Value: func(a ...tengo.Object) (tengo.Object, error) {
+			if len(a) < 1 {
+				return nil, tengo.ErrWrongNumArguments
+			}
+			p, ok := tengo.ToString(a[0])
+			if !ok {
+				return nil, tengo.ErrInvalidArgumentType{Name: "path", Expected: "string", Found: a[0].TypeName()}
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return &tengo.String{Value: ""}, nil
+			}
+			if !utf8.Valid(b) {
+				return &tengo.String{Value: ""}, nil
+			}
+			return &tengo.String{Value: string(b)}, nil
 		},
 	})
 
