@@ -1,15 +1,16 @@
-package aliases
+package aliases_test
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/grimdork/kush/internal/aliases"
 )
 
 func TestChainedAliasExpansion(t *testing.T) {
-	a := &Aliases{m: map[string]string{
-		"la": "ls -la",
-		"ls": "ls --color=yes",
-	}}
+	a := &aliases.Aliases{}
+	a.Set("la", "ls -la")
+	a.Set("ls", "ls --color=yes")
 
 	in := "la"
 	out := a.Expand(in)
