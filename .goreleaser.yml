@@ -47,7 +47,7 @@ brews:
       owner: grimdork
       name: homebrew-tools
     commit_author:
-      name: grimdork
+      name: Grimdork
       email: github@grimdork.net
     homepage: "https://github.com/grimdork/kush"
     description: "kush — small interactive shell"
