@@ -12,15 +12,17 @@ import (
 	"time"
 
 	"github.com/grimdork/kush/internal/log"
+	"github.com/grimdork/kush/internal/pity"
+	"github.com/grimdork/kush/internal/termio"
 
 	"golang.org/x/sys/unix"
 )
 
 // RunShell runs a command line inside a pseudoterminal so interactive programs
-// behave correctly. Uses the linux pty implementation (openpty in pty_linux.go)
-// and the passthrough helpers in pty_runner.go.
+// behave correctly. Uses the platform pty implementation and the passthrough
+// helpers in internal/termio.
 func RunShell(line string) error {
-	masterFd, slaveFd, err := openpty()
+	masterFd, slaveFd, err := pity.OpenPTY()
 	if err != nil {
 		log.Debugf("openpty unavailable, using plain exec: %v", err)
 		return runPlain(line)
@@ -46,7 +48,7 @@ func RunShell(line string) error {
 
 	// Switch stdin to passthrough mode before starting the child.
 	stdinFd := int(os.Stdin.Fd())
-	oldTermios, termErr := saveAndSetPassthrough(stdinFd)
+	oldTermios, termErr := termio.SaveAndSetPassthrough(stdinFd)
 	if termErr != nil {
 		log.Debugf("passthrough mode failed: %v", termErr)
 	}
@@ -55,7 +57,7 @@ func RunShell(line string) error {
 		slave.Close()
 		master.Close()
 		if termErr == nil {
-			restoreTermios(stdinFd, oldTermios)
+			_ = termio.RestoreTermios(stdinFd, oldTermios)
 		}
 		return err
 	}
@@ -64,7 +66,7 @@ func RunShell(line string) error {
 	// EOF/EIO promptly when the child exits.
 	slave.Close()
 
-	stopWinSize := propagateWinSize(masterFd)
+	stopWinSize := pity.PropagateWinSize(masterFd)
 
 	// Forward signals to the child's process group.
 	sigc := make(chan os.Signal, 1)
@@ -156,7 +158,7 @@ func RunShell(line string) error {
 	stopWinSize()
 
 	if termErr == nil {
-		restoreTermios(stdinFd, oldTermios)
+		_ = termio.RestoreTermios(stdinFd, oldTermios)
 	}
 
 	// Ensure the next prompt starts on a fresh line.

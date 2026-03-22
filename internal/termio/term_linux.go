@@ -1,18 +1,17 @@
 //go:build linux
 // +build linux
 
-package runner
+package termio
 
 import (
 	"golang.org/x/sys/unix"
 )
 
-// saveAndSetPassthrough puts the terminal into passthrough mode for PTY
+// SaveAndSetPassthrough puts the terminal into passthrough mode for PTY
 // forwarding: disables ICANON, ECHO, ISIG and IEXTEN so keypresses reach the
-// child immediately, but preserves OPOST so any stderr output (e.g. debug
-// logs) still gets proper CR+LF translation. Returns the previous termios for
-// restoration after the child exits.
-func saveAndSetPassthrough(fd int) (unix.Termios, error) {
+// child immediately, but preserves OPOST so any stderr output still gets
+// proper CR+LF translation. Returns the previous termios for restoration.
+func SaveAndSetPassthrough(fd int) (unix.Termios, error) {
 	p, err := unix.IoctlGetTermios(fd, unix.TCGETS)
 	if err != nil {
 		return unix.Termios{}, err
@@ -32,6 +31,7 @@ func saveAndSetPassthrough(fd int) (unix.Termios, error) {
 	return old, nil
 }
 
-func restoreTermios(fd int, t unix.Termios) error {
+// RestoreTermios restores the termios state for fd.
+func RestoreTermios(fd int, t unix.Termios) error {
 	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
 }

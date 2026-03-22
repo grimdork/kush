@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/grimdork/kush/internal/log"
+	"github.com/grimdork/kush/internal/pity"
+	"github.com/grimdork/kush/internal/termio"
 
 	"golang.org/x/sys/unix"
 )
@@ -20,7 +22,7 @@ import (
 // behave correctly. Falls back to a plain exec.Command when openpty is
 // unavailable (see pty_unsupported.go).
 func RunShell(line string) error {
-	masterFd, slaveFd, err := openpty()
+	masterFd, slaveFd, err := pity.OpenPTY()
 	if err != nil {
 		log.Debugf("openpty unavailable, using plain exec: %v", err)
 		return runPlain(line)
@@ -46,7 +48,7 @@ func RunShell(line string) error {
 
 	// Switch stdin to passthrough mode before starting the child.
 	stdinFd := int(os.Stdin.Fd())
-	oldTermios, termErr := saveAndSetPassthrough(stdinFd)
+	oldTermios, termErr := termio.SaveAndSetPassthrough(stdinFd)
 	if termErr != nil {
 		log.Debugf("passthrough mode failed: %v", termErr)
 	}
@@ -55,7 +57,7 @@ func RunShell(line string) error {
 		slave.Close()
 		master.Close()
 		if termErr == nil {
-			restoreTermios(stdinFd, oldTermios)
+			_ = termio.RestoreTermios(stdinFd, oldTermios)
 		}
 		return err
 	}
@@ -64,7 +66,7 @@ func RunShell(line string) error {
 	// EOF/EIO promptly when the child exits.
 	slave.Close()
 
-	stopWinSize := propagateWinSize(masterFd)
+	stopWinSize := pity.PropagateWinSize(masterFd)
 
 	// Forward signals to the child's process group.
 	sigc := make(chan os.Signal, 1)
@@ -156,7 +158,7 @@ func RunShell(line string) error {
 	stopWinSize()
 
 	if termErr == nil {
-		restoreTermios(stdinFd, oldTermios)
+		_ = termio.RestoreTermios(stdinFd, oldTermios)
 	}
 
 	// Ensure the next prompt starts on a fresh line.
@@ -185,28 +187,4 @@ func runPlain(line string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 	return cmd.Run()
-}
-
-func saveAndSetPassthrough(fd int) (unix.Termios, error) {
-	p, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
-	if err != nil {
-		return unix.Termios{}, err
-	}
-	old := *p
-
-	raw := old
-	raw.Lflag &^= unix.ICANON | unix.ECHO | unix.ECHONL | unix.ISIG | unix.IEXTEN
-	raw.Iflag &^= unix.ICRNL | unix.INLCR | unix.IGNCR | unix.IXON
-	// Leave Oflag untouched — OPOST must stay enabled.
-	raw.Cc[unix.VMIN] = 1
-	raw.Cc[unix.VTIME] = 0
-
-	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &raw); err != nil {
-		return old, err
-	}
-	return old, nil
-}
-
-func restoreTermios(fd int, t unix.Termios) error {
-	return unix.IoctlSetTermios(fd, unix.TIOCSETA, &t)
 }
