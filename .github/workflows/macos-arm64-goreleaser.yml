@@ -45,3 +45,44 @@ jobs:
           # GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+
+      - name: Upload macOS artifacts to release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.GITHUB_REF.replace('refs/tags/','');
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            let release = null;
+            for (let i = 0; i < 30; i++) {
+              try {
+                release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+                break;
+              } catch (e) {
+                await new Promise(r => setTimeout(r, 10000));
+              }
+            }
+            if (!release) core.setFailed('Release not found after waiting');
+            const distDir = 'dist';
+            if (!fs.existsSync(distDir)) {
+              core.setFailed(`dist directory not found: ${distDir}`);
+            }
+            const files = fs.readdirSync(distDir);
+            for (const file of files) {
+              const filePath = path.join(distDir, file);
+              const stats = fs.statSync(filePath);
+              const headers = { 'content-type': 'application/octet-stream', 'content-length': stats.size };
+              const stream = fs.createReadStream(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.data.id,
+                name: file,
+                data: stream,
+                headers,
+              });
+              core.info(`Uploaded ${file}`);
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
