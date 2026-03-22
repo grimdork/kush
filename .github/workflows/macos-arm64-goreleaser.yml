@@ -32,7 +32,7 @@ jobs:
       - name: Run goreleaser (macOS arm64)
         uses: goreleaser/goreleaser-action@v4
         with:
-          args: release --clean
+          args: release --config .goreleaser.yml --skip-publish --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CGO_ENABLED: '1'

@@ -5,7 +5,24 @@ before:
     - go mod download
 
 builds:
-  - id: client
+  # Linux / FreeBSD cross-builds (no cgo)
+  - id: client_nocgo
+    dir: .
+    main: .
+    binary: kush
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.date={{.CommitDate}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+
+  # macOS build (CGO enabled for proper openpty / notarization)
+  - id: client_darwin
     dir: .
     main: .
     binary: kush
@@ -19,7 +36,7 @@ builds:
       - arm64
 
 release:
-  prerelease: "true"
+  prerelease: true
 
 archives:
   - wrap_in_directory: true
@@ -37,6 +54,25 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+
+nfpms:
+  - package_name: kush
+    vendor: "grimdork.net"
+    maintainer: "Grimdork <github@grimdork.net>"
+    homepage: "https://github.com/grimdork/kush"
+    description: "A tiny custom shell written in Go"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: "/usr/bin"
+    section: contrib
+    priority: extra
+    contents:
+      - src: LICENSE
+        dst: "/usr/share/doc/kush/LICENSE"
+      - src: README.md
+        dst: "/usr/share/doc/kush/README.md"
 
 # Publish a Homebrew formula into a tap repository. Goreleaser will create or update the formula
 # in the specified repository (e.g. grimdork/homebrew-tools). Adjust repository/name if you prefer
